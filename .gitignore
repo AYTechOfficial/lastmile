@@ -23,6 +23,12 @@
 # production
 /build
 
+# catalyst appsail deploy artifacts (app-config.json carries env secrets)
+/deployable
+app-config.json
+.catalystrc
+.catalyst/
+
 # misc
 .DS_Store
 *.pem

@@ -82,6 +82,24 @@ NEXT_PUBLIC_SIGNUP_MODE=waitlist   # waitlist | open
 BROWSER_USE_API_KEY= # cloud browser for live QA (optional; falls back to local Chromium)
 ```
 
+## Deploying on Zoho Catalyst
+
+The production deployment target is Zoho Catalyst AppSail (Next.js SSR,
+Node 20 stack, 1 GB instance):
+
+```bash
+npm run pack:catalyst && catalyst deploy --only appsail:lastmile --ignore-scripts
+```
+
+The pack script snapshots the build into `deployable/` (slim `.next` + pruned
+`next` runtime) and writes `app-config.json` from `.env.local` — both are
+gitignored because the latter carries secrets. `AUTH_URL` is excluded
+intentionally: it pins Auth.js to localhost and would poison OAuth callbacks;
+`AUTH_TRUST_HOST` covers host inference. The startup command is a JS shim
+(`deployable/start.js`) that listens on Catalyst's injected
+`X_ZOHO_CATALYST_LISTEN_PORT`, since shell-only startup commands do not
+expand variables on AppSail.
+
 ## Scripts
 
 ```bash
