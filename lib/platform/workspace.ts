@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 
 /* Build workspace — where the Coding Agent's codebase lives and what the Deploy
@@ -11,24 +12,33 @@ import { join, relative, sep } from "node:path";
    Paths in this module are always relative to the workspace root and validated
    against traversal before any read or write. */
 
-const ROOT = join(process.cwd(), ".builds");
+const ROOT = process.env.VERCEL
+  ? join(tmpdir(), "lastmile-builds")
+  : join(process.cwd(), ".builds");
+
+/** mkdir that never throws. Serverless deployments mount the project
+ *  directory read-only, so creating .builds/ there raises EROFS; that used to
+ *  propagate out of listFiles() and turn the code viewer into a 500. Callers
+ *  treat an uncreatable workspace as "empty" and fall back to GitHub. */
+function ensureDir(dir: string): string {
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch {
+    /* read-only fs or missing parent - reported downstream as no workspace */
+  }
+  return dir;
+}
 
 export function workspaceDir(runId: string): string {
-  const dir = join(ROOT, sanitize(runId), "app");
-  mkdirSync(dir, { recursive: true });
-  return dir;
+  return ensureDir(join(ROOT, sanitize(runId), "app"));
 }
 
 export function artifactsDir(runId: string): string {
-  const dir = join(ROOT, sanitize(runId), "artifacts");
-  mkdirSync(dir, { recursive: true });
-  return dir;
+  return ensureDir(join(ROOT, sanitize(runId), "artifacts"));
 }
 
 export function zipPath(runId: string): string {
-  const dir = join(ROOT, sanitize(runId));
-  mkdirSync(dir, { recursive: true });
-  return join(dir, "codebase.zip");
+  return join(ensureDir(join(ROOT, sanitize(runId))), "codebase.zip");
 }
 
 function sanitize(id: string): string {
@@ -58,7 +68,7 @@ export function writeFiles(runId: string, files: WorkspaceFile[]): string[] {
   for (const f of files) {
     const rel = safeRel(f.path);
     const abs = join(base, rel);
-    mkdirSync(abs.slice(0, abs.lastIndexOf(sep)), { recursive: true });
+    ensureDir(abs.slice(0, abs.lastIndexOf(sep)));
     writeFileSync(abs, f.content, "utf8");
     written.push(rel);
   }
