@@ -14,7 +14,20 @@ export default async function RunPage({
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
   const { id } = await params;
-  const state = await getRunState(id, session.user.id);
+  /* TEMP DEBUG — production hides server errors behind a minified digest;
+     render the real one until the run-page 500 is root-caused. */
+  let state;
+  try {
+    state = await getRunState(id, session.user.id);
+  } catch (e) {
+    return (
+      <pre
+        style={{ maxWidth: 900, margin: "40px auto", padding: 16, overflowX: "auto", fontSize: 12, whiteSpace: "pre-wrap" }}
+      >
+        {"RUN PAGE DEBUG\n" + (e instanceof Error ? (e.stack ?? e.message) : String(e))}
+      </pre>
+    );
+  }
   if (!state) notFound();
 
   /* Keyed on the server snapshot: when an action revalidates this route
