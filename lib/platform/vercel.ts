@@ -1,5 +1,10 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { users } from "@/lib/schema";
+import { decryptSecret, encryptSecret } from "@/lib/crypto";
+import { currentUserId } from "@/lib/ai/context";
 import { workspaceDir, listFiles } from "./workspace";
 import { resolveInfraToken } from "./settings";
 
@@ -10,7 +15,14 @@ import { resolveInfraToken } from "./settings";
    Fallback: Render web service from the GitHub repo, when a Render key and a
    GitHub repo both exist and Vercel failed.
 
-   Token resolution: VERCEL_TOKEN env, then the admin-supplied token. */
+   Token resolution (first that exists wins), the same pattern as GitHub:
+     1. the run owner's connected Vercel token (Settings → Connections, so
+        builds host on THEIR account)
+     2. VERCEL_TOKEN env (+ VERCEL_TEAM_ID)
+     3. the admin-supplied token in Admin → Infrastructure
+
+   The run owner comes from the pipeline's user scope (AsyncLocalStorage),
+   so no agent has to thread a userId down to the deploy stage. */
 
 export type DeployEnv = Record<string, string>;
 
@@ -29,16 +41,116 @@ function collectFiles(runId: string): { file: string; data: string; encoding: "b
   return out;
 }
 
-export function vercelToken(): string | null {
-  return process.env.VERCEL_TOKEN?.trim() || null;
+export type VercelConnection = {
+  token: string;
+  teamId: string | null;
+  /** verified Vercel username when known */
+  account: string | null;
+  source: "user" | "platform";
+};
+
+/** The run owner's connected token (Settings → Connections). */
+async function userVercelConnection(userId: string | null): Promise<VercelConnection | null> {
+  if (!userId) return null;
+  try {
+    const [row] = await db
+      .select({ token: users.vercelTokenEncrypted, teamId: users.vercelTeamId, account: users.vercelAccount })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!row?.token) return null;
+    const token = decryptSecret(row.token);
+    if (!token) return null;
+    return { token, teamId: row.teamId ?? null, account: row.account ?? null, source: "user" };
+  } catch {
+    return null; // an unreadable connection must not fail a deploy — fall through
+  }
 }
 
-async function vercelTokenResolved(): Promise<string | null> {
-  return vercelToken() ?? resolveInfraToken("vercel");
+/** Operator-level capacity: env first, then Admin → Infrastructure. */
+async function platformVercelConnection(): Promise<VercelConnection | null> {
+  const env = process.env.VERCEL_TOKEN?.trim();
+  if (env) {
+    return { token: env, teamId: process.env.VERCEL_TEAM_ID?.trim() || null, account: null, source: "platform" };
+  }
+  try {
+    const admin = await resolveInfraToken("vercel");
+    if (admin) return { token: admin, teamId: null, account: null, source: "platform" };
+  } catch {
+    /* db unavailable — treat as absent */
+  }
+  return null;
 }
 
-function teamQuery(): string {
-  return process.env.VERCEL_TEAM_ID?.trim() ? "?teamId=" + process.env.VERCEL_TEAM_ID.trim() : "";
+/** Deploy token resolution for a run: the owner's own Vercel, else the platform's. */
+export async function vercelConnectionForUser(userId: string | null): Promise<VercelConnection | null> {
+  return (await userVercelConnection(userId)) ?? (await platformVercelConnection());
+}
+
+/** Non-secret view for the Settings page. */
+export async function vercelConnectionStatus(
+  userId: string | null,
+): Promise<{ connected: boolean; account: string | null; source: "user" | "platform" | null }> {
+  const own = await userVercelConnection(userId);
+  if (own) return { connected: true, account: own.account, source: "user" };
+  const platform = await platformVercelConnection();
+  return platform
+    ? { connected: true, account: platform.account, source: "platform" }
+    : { connected: false, account: null, source: null };
+}
+
+/** Check a candidate token against /v2/user before storing it. */
+export async function verifyVercelToken(
+  token: string,
+): Promise<{ ok: true; username: string | null } | { ok: false; error: string }> {
+  try {
+    const res = await fetch("https://api.vercel.com/v2/user", {
+      headers: { authorization: "Bearer " + token },
+      cache: "no-store",
+      signal: AbortSignal.timeout(15_000),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      let msg = text.slice(0, 160);
+      try {
+        msg = (JSON.parse(text) as { error?: { message?: string } }).error?.message ?? msg;
+      } catch {
+        /* keep raw */
+      }
+      return { ok: false, error: `Vercel rejected the token (HTTP ${res.status}) — ${msg}` };
+    }
+    const j = JSON.parse(text) as { user?: { username?: string; email?: string } };
+    return { ok: true, username: j.user?.username ?? j.user?.email?.split("@")[0] ?? null };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message.slice(0, 160) : "Could not reach Vercel" };
+  }
+}
+
+export async function saveVercelConnection(
+  userId: string,
+  token: string,
+  teamId: string | null,
+  account: string | null,
+): Promise<void> {
+  await db
+    .update(users)
+    .set({
+      vercelTokenEncrypted: encryptSecret(token),
+      vercelTeamId: teamId?.trim() || null,
+      vercelAccount: account,
+    })
+    .where(eq(users.id, userId));
+}
+
+export async function clearVercelConnection(userId: string): Promise<void> {
+  await db
+    .update(users)
+    .set({ vercelTokenEncrypted: null, vercelTeamId: null, vercelAccount: null })
+    .where(eq(users.id, userId));
+}
+
+function teamQuery(teamId: string | null): string {
+  return teamId ? "?teamId=" + encodeURIComponent(teamId) : "";
 }
 
 export type DeployResult = {
@@ -64,12 +176,12 @@ export class RemoteBuildError extends Error {
 
 /** Pull the compressed build log of a failed deployment as plain text. */
 export async function fetchVercelBuildLog(deploymentId: string): Promise<string> {
-  const token = await vercelTokenResolved();
-  if (!token) return "";
+  const conn = await vercelConnectionForUser(currentUserId());
+  if (!conn) return "";
   try {
     const res = await fetch(
-      "https://api.vercel.com/v3/deployments/" + deploymentId + "/events?builds=1&direction=forward" + teamQuery(),
-      { headers: { authorization: "Bearer " + token }, cache: "no-store" },
+      "https://api.vercel.com/v3/deployments/" + deploymentId + "/events?builds=1&direction=forward" + teamQuery(conn.teamId),
+      { headers: { authorization: "Bearer " + conn.token }, cache: "no-store" },
     );
     if (!res.ok) return "";
     const body = await res.text();
@@ -96,16 +208,21 @@ export async function deployToVercel(
   runId: string,
   opts: { projectName: string; env: DeployEnv; onLine: (line: string) => Promise<void> | void },
 ): Promise<DeployResult> {
-  const token = await vercelTokenResolved();
-  if (!token) throw new Error("no Vercel token — add VERCEL_TOKEN to .env.local or a token in Admin → Infrastructure");
+  /* the run owner's Vercel when connected, else the operator's — deploy runs
+     inside the pipeline's user scope, so the owner resolves here */
+  const conn = await vercelConnectionForUser(currentUserId());
+  if (!conn)
+    throw new Error(
+      "no Vercel token — connect Vercel in Settings (or the operator adds VERCEL_TOKEN) before runs can ship",
+    );
 
   const files = collectFiles(runId);
   if (files.length === 0) throw new Error("workspace has no deployable files");
   await opts.onLine(`-> packaging ${files.length} files for vercel`);
 
-  const created = await fetch("https://api.vercel.com/v13/deployments" + teamQuery(), {
+  const created = await fetch("https://api.vercel.com/v13/deployments" + teamQuery(conn.teamId), {
     method: "POST",
-    headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+    headers: { authorization: "Bearer " + conn.token, "content-type": "application/json" },
     body: JSON.stringify({
       name: opts.projectName,
       target: "production",
@@ -139,8 +256,8 @@ export async function deployToVercel(
   await opts.onLine("-> building on vercel (" + lastState.toLowerCase() + ")");
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 5000));
-    const poll = await fetch("https://api.vercel.com/v13/deployments/" + dep.id + teamQuery(), {
-      headers: { authorization: "Bearer " + token },
+    const poll = await fetch("https://api.vercel.com/v13/deployments/" + dep.id + teamQuery(conn.teamId), {
+      headers: { authorization: "Bearer " + conn.token },
       cache: "no-store",
     });
     if (!poll.ok) throw new Error("vercel poll failed: " + poll.status);
@@ -178,8 +295,8 @@ export async function deployToVercel(
   }
   /* deadline hit — re-check once before reporting, so a deployment that went
      READY in the final seconds is not declared dead */
-  const final = await fetch("https://api.vercel.com/v13/deployments/" + dep.id + teamQuery(), {
-    headers: { authorization: "Bearer " + token },
+  const final = await fetch("https://api.vercel.com/v13/deployments/" + dep.id + teamQuery(conn.teamId), {
+    headers: { authorization: "Bearer " + conn.token },
     cache: "no-store",
   });
   if (final.ok) {

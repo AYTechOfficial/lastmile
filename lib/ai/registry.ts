@@ -1,25 +1,39 @@
 import type { ChatOptions, ChatResult, ChatMessage } from "./providers";
 import { chatWith, providerStates } from "./providers";
 import { getPlatformData, resolveProviders, type AgentId, type PlanId } from "@/lib/platform/settings";
+import { activeUserProviders } from "@/lib/platform/user-providers";
+import { currentUserId } from "./context";
 
 /* Model registry — decides which endpoint each agent talks to.
 
    Resolution order for (agent, plan):
-     1. Admin-configured providers scoped to that plan (and that agent when
-        the entry is agent-specific) — tried in the order the admin ordered them.
-     2. The env-key chain from providers.ts (free tiers), in chain order.
+     1. The signed-in user's OWN providers (Settings → Your providers) scoped
+        to that agent — a key they pay for wins.
+     2. Admin-configured platform providers scoped to that plan (and that
+        agent when the entry is agent-specific), in the operator's order.
+     3. The env-key chain from providers.ts (free tiers), in chain order.
 
    Returns a chat() bound to the resolved chain so every agent call site is a
    one-liner that still reports which provider actually answered. */
 
 export type ResolvedChain = {
   providers: { id: string; label: string; baseUrl: string; apiKey: string; models: string[] }[];
-  /** human-readable summary for logs, e.g. "admin:Groq-70b → env:Gemini" */
+  /** human-readable summary for logs, e.g. "own:My endpoint → admin:Groq-70b → env:Gemini" */
   summary: string;
-  source: "admin" | "env" | "none";
+  source: "user" | "admin" | "env" | "none";
 };
 
 export async function resolveChain(plan: PlanId, agent: AgentId): Promise<ResolvedChain> {
+  const userId = currentUserId();
+
+  // 1) the user's own endpoints, in the order they added them — scoped to the
+  //    agent so a provider pinned to one agent never leaks into another.
+  const own = userId
+    ? (await activeUserProviders(userId))
+        .filter((p) => p.models.length > 0)
+        .map((p) => ({ id: p.id, label: p.label, baseUrl: p.baseUrl, apiKey: p.apiKey, models: p.models }))
+    : [];
+
   const data = await getPlatformData();
   // keep the admin's ordering, but only entries this (plan, agent) may use:
   // a provider reserved for one agent never leaks into another agent's chain.
@@ -51,16 +65,13 @@ export async function resolveChain(plan: PlanId, agent: AgentId): Promise<Resolv
       };
     });
 
-  const providers = [...scoped, ...env];
+  const providers = [...own, ...scoped, ...env];
   if (providers.length > 0) {
-    return {
-      providers,
-      summary:
-        (scoped.length > 0 ? "admin: " + scoped.map((p) => p.label).join(" → ") : "") +
-        (scoped.length > 0 && env.length > 0 ? " → " : "") +
-        (env.length > 0 ? "env: " + env.map((p) => p.label).join(" → ") : ""),
-      source: scoped.length > 0 ? "admin" : "env",
-    };
+    const parts = [];
+    if (own.length > 0) parts.push("own: " + own.map((p) => p.label).join(" → "));
+    if (scoped.length > 0) parts.push("admin: " + scoped.map((p) => p.label).join(" → "));
+    if (env.length > 0) parts.push("env: " + env.map((p) => p.label).join(" → "));
+    return { providers, summary: parts.join(" → "), source: own.length > 0 ? "user" : scoped.length > 0 ? "admin" : "env" };
   }
 
   return { providers: [], summary: "none configured", source: "none" };

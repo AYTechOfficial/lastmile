@@ -5,6 +5,7 @@ import type { PlanId } from "./platform/settings";
 import { research, type ResearchBrief } from "./agents/research";
 import { fallbackSpec, specFromBrief, type ProductSpec } from "./agents/spec";
 import { isPipelineActive, kickPipeline } from "./pipeline/orchestrator";
+import { runAsUser } from "./ai/context";
 
 /* The pipeline engine.
 
@@ -334,10 +335,11 @@ async function runPreApprovalStages(runId: string): Promise<void> {
 }
 
 /** Fire-and-forget the pre-approval stages. Safe to call repeatedly. */
-export function kick(runId: string): void {
+export function kick(runId: string, userId: string | null): void {
   if (active.has(runId)) return;
   active.add(runId);
-  void (async () => {
+  // scope the job to the run's owner so research/spec resolve their keys first
+  void runAsUser(userId, async () => {
     try {
       await runPreApprovalStages(runId);
     } catch (err) {
@@ -350,7 +352,7 @@ export function kick(runId: string): void {
     } finally {
       active.delete(runId);
     }
-  })();
+  });
 }
 
 /* ————————————————————— timeline materialization ————————————————————— */
@@ -457,7 +459,7 @@ export async function advanceRun(runId: string, userId: string): Promise<RunRow 
 
   if (run.status === "queued") {
     if (live) {
-      kick(run.id); // the agent owns the pre-approval stages
+      kick(run.id, run.userId); // the agent owns the pre-approval stages
       return { ...run, status: "researching", currentStage: "research" };
     }
     await db
@@ -476,7 +478,7 @@ export async function advanceRun(runId: string, userId: string): Promise<RunRow 
       const anchor = (run.startedAt ?? run.createdAt).getTime();
       const stalled = now - anchor > 180_000;
       if (stalled && !isJobActive(run.id) && !run.research) {
-        kick(run.id);
+        kick(run.id, run.userId);
       }
       return run;
     }
@@ -514,7 +516,7 @@ export async function advanceRun(runId: string, userId: string): Promise<RunRow 
      orchestrator resumes from runs.pipeline_state instead of starting over. */
   if (live) {
     if (!isPipelineActive(run.id) && !run.killRequested) {
-      kickPipeline(run.id);
+      kickPipeline(run.id, run.userId);
     }
     return run;
   }

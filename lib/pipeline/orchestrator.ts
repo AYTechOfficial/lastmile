@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { agentRuns, runFlows, runIssues, runs, users } from "@/lib/schema";
 import { BAND, logRunEvent } from "@/lib/run-engine";
+import { runAsUser } from "@/lib/ai/context";
 import type { ResearchBrief } from "@/lib/agents/research";
 import { fallbackSpec, specFromBrief, type ProductSpec } from "@/lib/agents/spec";
 import { engineerPrompt, type MasterBuildPrompt } from "@/lib/agents/prompt-engineer";
@@ -657,10 +658,12 @@ export function isPipelineActive(runId: string): boolean {
   return activeJobs.has(runId);
 }
 
-export function kickPipeline(runId: string): void {
+export function kickPipeline(runId: string, userId: string | null): void {
   if (activeJobs.has(runId)) return;
   activeJobs.add(runId);
-  void (async () => {
+  // the run's owner scopes every model call inside: their own providers first,
+  // then the platform's, then the env chain
+  void runAsUser(userId, async () => {
     try {
       await runPipeline(runId);
     } catch (err) {
@@ -673,7 +676,7 @@ export function kickPipeline(runId: string): void {
     } finally {
       activeJobs.delete(runId);
     }
-  })();
+  });
 }
 
 /** Retry a capped/failed run from its last good stage. Never fake progress. */
@@ -695,6 +698,6 @@ export function retryRun(runId: string): void {
       killRequested: false,
       pipelineState: { ...state, stage: resume },
     });
-    kickPipeline(runId);
+    kickPipeline(runId, run.userId);
   })();
 }

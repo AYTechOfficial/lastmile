@@ -72,7 +72,7 @@ export async function createRunAction(
     .returning();
 
   // the Research Agent takes it from here; the dashboard streams its work live
-  kick(run.id);
+  kick(run.id, run.userId);
 
   revalidatePath("/dashboard");
   redirect("/dashboard/runs/" + run.id);
@@ -107,7 +107,7 @@ export async function approveSpecAction(formData: FormData) {
 
   // the orchestrator owns everything after this point (live runs only —
   // legacy stub runs keep their planned timeline)
-  if (run.engine === "live") kickPipeline(run.id);
+  if (run.engine === "live") kickPipeline(run.id, run.userId);
 
   revalidatePath("/dashboard/runs/" + run.id);
 }

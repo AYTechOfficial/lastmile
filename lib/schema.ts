@@ -25,6 +25,13 @@ export const users = pgTable("user", {
   /** which GitHub identity hosts this user's generated code:
    *  auto = linked account if present, else the platform-hosted account */
   githubHost: text("github_host").notNull().default("auto"), // auto | account | platform
+  /** Connect Vercel (Settings → Connections): the user's own deploy token,
+   *  AES-256-GCM ciphertext. Deploys try this first, then the operator's. */
+  vercelTokenEncrypted: text("vercel_token_encrypted"),
+  /** optional Vercel team/scope id the user's deploys should target */
+  vercelTeamId: text("vercel_team_id"),
+  /** verified Vercel username, shown in Settings after connecting */
+  vercelAccount: text("vercel_account"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -186,3 +193,20 @@ export const runFlows = pgTable("run_flows", {
   attempts: integer("attempts").notNull().default(0),
   durationMs: integer("duration_ms"),
 }, (t) => [uniqueIndex("run_flows_run_pos").on(t.runId, t.position)]);
+
+/* A user's OWN model endpoints. Tried before the operator's platform providers
+   and before the env-key chain — a key the user pays for should win, and the
+   platform's capacity is the fallback, not the default. Keys are stored as
+   AES-256-GCM ciphertext, same as the admin ones. */
+export const userProviders = pgTable("user_providers", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  label: text("label").notNull(),
+  baseUrl: text("base_url").notNull(),
+  keyEncrypted: text("key_encrypted").notNull(),
+  models: jsonb("models").notNull().default([]),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});

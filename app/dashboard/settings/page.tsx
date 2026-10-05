@@ -9,6 +9,10 @@ import { accounts } from "@/lib/schema";
 import { providerStates } from "@/lib/ai/providers";
 import { searchProviderStates } from "@/lib/ai/search";
 import { getPlatformData } from "@/lib/platform/settings";
+import { listUserProviders } from "@/lib/platform/user-providers";
+import { vercelConnectionStatus } from "@/lib/platform/vercel";
+import { UserProviders } from "@/components/app/user-providers";
+import { VercelConnect } from "@/components/app/vercel-connect";
 import { signOutAction } from "@/app/actions/auth";
 import { GithubIcon } from "@/components/github-icon";
 import { Badge, Panel, btn } from "@/components/kit";
@@ -28,6 +32,7 @@ export default async function SettingsPage() {
     .from(accounts)
     .where(eq(accounts.userId, session.user.id));
   const githubLinked = linked.some((a) => a.provider === "github");
+  const own = await listUserProviders(session.user.id);
 
   const models = providerStates();
   const search = searchProviderStates();
@@ -35,9 +40,9 @@ export default async function SettingsPage() {
   const platform = await getPlatformData();
   const adminModels = platform.providers.filter((p) => p.enabled && p.models.length > 0);
   const anyModel = adminModels.length > 0 || models.some((m) => m.configured);
-  // deploy capacity, honestly surfaced: a platform token (env or admin) means
-  // every run can ship; without one the deploy stage says so and stops
-  const vercelReady = Boolean(process.env.VERCEL_TOKEN?.trim());
+  // deploy capacity, honestly surfaced: the user's connected Vercel first,
+  // then the operator's token (env or Admin → Infrastructure)
+  const vercel = await vercelConnectionStatus(session.user.id);
 
   return (
     <div className="mx-auto max-w-[820px] space-y-6">
@@ -79,6 +84,32 @@ export default async function SettingsPage() {
           pure resilience. Paste them into{" "}
           <code className="select-all rounded bg-surface2 px-1.5 py-0.5 font-mono text-[11px] text-t2">.env.local</code>{" "}
           and restart the dev server.
+        </p>
+      </section>
+
+      {/* ————— your own providers ————— */}
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="display flex items-center gap-2 text-[15px] font-semibold text-t1">
+            <Plug className="h-4 w-4 text-brand" />
+            Your providers
+          </h2>
+          <Badge tone={own.some((p) => p.enabled && p.models.length > 0) ? "pass" : "neutral"}>
+            {own.some((p) => p.enabled && p.models.length > 0)
+              ? "runs on your keys first"
+              : "platform keys are used until you add your own"}
+          </Badge>
+        </div>
+
+        <Panel className="p-4">
+          <UserProviders providers={own} />
+        </Panel>
+
+        <p className="text-[12.5px] leading-relaxed text-t3">
+          ChatGPT, Claude, OpenRouter, Groq, Cerebras, NVIDIA — anything OpenAI-compatible. Tap a preset, paste
+          your key, press Fetch models, and every model it serves starts selected: tap off the ones you
+          don&apos;t want, or keep them all. Your endpoints are tried before the platform&apos;s, so if you
+          attach a key your runs use it; if you don&apos;t, they fall back to the platform&apos;s capacity.
         </p>
       </section>
 
@@ -161,21 +192,33 @@ export default async function SettingsPage() {
                 </form>
               )}
             </div>
-            <ConnectionRow
-              icon={
-                <span className="flex h-4 w-4 items-center justify-center rounded bg-t1 text-[9px] font-bold text-app">
-                  ▲
-                </span>
-              }
-              name="Vercel"
-              state={vercelReady ? "ready — deploys will go live" : "no deploy token yet"}
-              detail={
-                vercelReady
-                  ? "the platform deploys every verified build to production — the run page shows the URL the moment it's live"
-                  : "an operator must add VERCEL_TOKEN to .env.local (or Admin → Infrastructure) before runs can ship"
-              }
-              tone={vercelReady ? "pass" : "neutral"}
-            />
+            <div className="px-4 py-3.5">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex min-w-0 items-start gap-3">
+                  <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-edge bg-surface2">
+                    <span className="flex h-4 w-4 items-center justify-center rounded bg-t1 text-[9px] font-bold text-app">
+                      ▲
+                    </span>
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[13.5px] font-medium text-t1">Vercel</p>
+                    <p className="mt-0.5 text-[11.5px] leading-snug text-t3">
+                      {vercel.connected
+                        ? vercel.source === "user"
+                          ? "your deploys ship to your own Vercel account — the run page shows the URL the moment it's live"
+                          : "the operator's Vercel hosts deploys for everyone — connect a token to host yours on your account"
+                        : "no deploy token anywhere yet — connect yours (or the operator adds one) before runs can ship"}
+                    </p>
+                  </div>
+                </div>
+                <Badge tone={vercel.connected ? "pass" : "neutral"} className="mt-1 shrink-0">
+                  {vercel.connected ? (vercel.source === "user" ? "your account" : "operator") : "not connected"}
+                </Badge>
+              </div>
+              <div className="mt-3">
+                <VercelConnect status={vercel} />
+              </div>
+            </div>
           </div>
         </Panel>
       </section>
@@ -272,33 +315,4 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
   );
 }
 
-function ConnectionRow({
-  icon,
-  name,
-  state,
-  detail,
-  tone,
-}: {
-  icon: React.ReactNode;
-  name: string;
-  state: string;
-  detail: string;
-  tone: "pass" | "neutral";
-}) {
-  return (
-    <div className="flex items-start justify-between gap-4 px-4 py-3.5">
-      <div className="flex min-w-0 items-start gap-3">
-        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-edge bg-surface2">
-          {icon}
-        </span>
-        <div className="min-w-0">
-          <p className="text-[13.5px] font-medium text-t1">{name}</p>
-          <p className="mt-0.5 text-[11.5px] leading-snug text-t3">{detail}</p>
-        </div>
-      </div>
-      <Badge tone={tone} className="mt-1 shrink-0">
-        {state}
-      </Badge>
-    </div>
-  );
-}
+
