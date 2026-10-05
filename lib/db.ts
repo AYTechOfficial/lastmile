@@ -36,7 +36,18 @@ const url = connectionString ?? "postgres://localhost:5432/postgres";
 
 const globalForDb = globalThis as unknown as { conn?: postgres.Sql };
 
-const conn = globalForDb.conn ?? postgres(url, { prepare: false });
+/* Each serverless instance pools independently — an uncapped pool (postgres.js
+   defaults to 10) lets a few warm lambdas eat Supavisor's client budget and
+   start throwing "max clients reached in session mode" inside renders, which
+   surfaces to users as React error #441. Cap the pool, release idle sockets
+   quickly, and (with DATABASE_URL on the transaction pooler, port 6543) the
+   15-client session limit never applies. */
+const conn = globalForDb.conn ?? postgres(url, {
+  prepare: false,
+  max: 5,
+  idle_timeout: 20,
+  connect_timeout: 10,
+});
 if (process.env.NODE_ENV !== "production") globalForDb.conn = conn;
 
 export const db = drizzle(conn, { schema });
