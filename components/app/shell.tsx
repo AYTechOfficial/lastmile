@@ -5,6 +5,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   AlertTriangle,
+  ChevronsLeft,
+  ChevronsRight,
   Cpu,
   Globe,
   LayoutDashboard,
@@ -59,6 +61,34 @@ export function Shell({
   const pathname = usePathname();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  /* Compressed rail: icon-only navigation. Stored per device and restored
+     after mount, so the server render and the first client render agree. */
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    let saved: string | null = null;
+    try {
+      saved = localStorage.getItem("lastmile.rail");
+    } catch {
+      /* private browsing — default to expanded */
+    }
+    if (saved !== "collapsed") return;
+    /* restore on the next frame: the first paint stays stable and the effect
+       never calls setState synchronously */
+    const id = requestAnimationFrame(() => setCollapsed(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  const toggleRail = () => {
+    setCollapsed((c) => {
+      try {
+        localStorage.setItem("lastmile.rail", c ? "open" : "collapsed");
+      } catch {
+        /* non-persistent is fine */
+      }
+      return !c;
+    });
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -84,10 +114,15 @@ export function Shell({
   const liveLlm = providers.llm.filter((p) => p.configured);
   const liveSearch = providers.search.find((p) => p.configured);
 
-  const rail = (
+  const rail = (railCollapsed: boolean) => (
     <div className="flex h-full flex-col">
       <div className="flex h-14 shrink-0 items-center justify-between px-4">
-        <Link href="/dashboard" onClick={closeNav} className="group flex items-center gap-2.5">
+        <Link
+          href="/dashboard"
+          onClick={closeNav}
+          title="Overview"
+          className="group flex items-center gap-2.5"
+        >
           <span className="flex h-7 w-7 items-center justify-center rounded-[9px] border border-brand/40 bg-brand/12 transition-colors group-hover:bg-brand/20">
             <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5">
               <path
@@ -99,24 +134,38 @@ export function Shell({
               />
             </svg>
           </span>
-          <span className="display text-[15px] font-semibold tracking-tight text-t1">
-            lastmile<span className="text-brand">.</span>
-          </span>
+          {!railCollapsed && (
+            <span className="display text-[15px] font-semibold tracking-tight text-t1">
+              lastmile<span className="text-brand">.</span>
+            </span>
+          )}
         </Link>
-        <button
-          type="button"
-          onClick={() => setNavOpen(false)}
-          className="text-t3 hover:text-t1 md:hidden"
-          aria-label="Close navigation"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex items-center">
+          {/* the compress toggle — desktop only; the mobile drawer keeps its close X */}
+          <button
+            type="button"
+            onClick={toggleRail}
+            title={railCollapsed ? "Expand sidebar" : "Compress sidebar"}
+            aria-label={railCollapsed ? "Expand sidebar" : "Compress sidebar"}
+            className="hidden h-7 w-7 items-center justify-center rounded-[8px] text-t3 transition-colors hover:bg-surface2 hover:text-t1 md:flex"
+          >
+            {railCollapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
+          </button>
+          <button
+            type="button"
+            onClick={() => setNavOpen(false)}
+            className="text-t3 hover:text-t1 md:hidden"
+            aria-label="Close navigation"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       <div className="px-3">
-        <Link href="/dashboard#compose" onClick={closeNav} className={btn("brand", "md", "w-full")}>
+        <Link href="/dashboard#compose" onClick={closeNav} title="New run" className={btn("brand", "md", "w-full")}>
           <Plus className="h-4 w-4" />
-          New run
+          {!railCollapsed && "New run"}
         </Link>
       </div>
 
@@ -128,20 +177,25 @@ export function Shell({
               key={item.href}
               href={item.href}
               onClick={closeNav}
+              title={item.label}
               className={cn(
                 "flex items-center gap-2.5 rounded-[10px] px-3 py-2 text-[13px] transition-colors",
+                railCollapsed && "justify-center px-0",
                 active ? "bg-surface2 font-medium text-t1" : "text-t2 hover:bg-surface2/60 hover:text-t1",
               )}
             >
               <item.icon className={cn("h-4 w-4", active ? "text-brand" : "text-t3")} />
-              {item.label}
-              {active ? <span className="ml-auto h-1 w-1 rounded-full bg-brand" /> : null}
+              {!railCollapsed && item.label}
+              {active && !railCollapsed ? <span className="ml-auto h-1 w-1 rounded-full bg-brand" /> : null}
             </Link>
           );
         })}
       </nav>
 
-      <div className="mt-6 flex min-h-0 flex-1 flex-col px-3">
+      {/* collapsed: the runs list lives in the full rail only — keep the footer pinned */}
+      {railCollapsed && <div className="min-h-0 flex-1" />}
+
+      <div className={cn("mt-6 flex min-h-0 flex-1 flex-col px-3", railCollapsed && "md:hidden")}>
         <div className="flex min-h-[18px] items-center justify-between gap-2 px-1.5 pb-2">
           <span className="eyebrow">Runs</span>
           <span className="flex items-center gap-2.5">
@@ -207,23 +261,30 @@ export function Shell({
       </div>
 
       <div className="shrink-0 border-t border-edge p-3">
-        <div className="flex items-center gap-2.5 px-1.5 py-1.5">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand/50 to-info/30 text-[11px] font-semibold text-white">
+        <div className={cn("flex items-center gap-2.5 px-1.5 py-1.5", railCollapsed && "justify-center px-0")}>
+          <span
+            title={railCollapsed ? name + " · " + email : undefined}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand/50 to-info/30 text-[11px] font-semibold text-white"
+          >
             {name.slice(0, 1).toUpperCase()}
           </span>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-[12.5px] font-medium text-t1">{name}</p>
-            <p className="truncate font-mono text-[9.5px] text-t3">{email}</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => void signOutAction()}
-            title="Sign out"
-            aria-label="Sign out"
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-t3 transition-colors hover:bg-surface2 hover:text-bad"
-          >
-            <LogOut className="h-3.5 w-3.5" />
-          </button>
+          {!railCollapsed && (
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[12.5px] font-medium text-t1">{name}</p>
+              <p className="truncate font-mono text-[9.5px] text-t3">{email}</p>
+            </div>
+          )}
+          {!railCollapsed && (
+            <button
+              type="button"
+              onClick={() => void signOutAction()}
+              title="Sign out"
+              aria-label="Sign out"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-t3 transition-colors hover:bg-surface2 hover:text-bad"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -237,8 +298,13 @@ export function Shell({
         <div className="absolute -top-40 left-1/2 h-[420px] w-[900px] -translate-x-1/2 rounded-full bg-brand/[0.06] blur-[140px]" />
       </div>
 
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] border-r border-edge bg-well/80 backdrop-blur-xl md:block">
-        {rail}
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-40 hidden border-r border-edge bg-well/80 backdrop-blur-xl transition-[width] duration-200 ease-out md:block",
+          collapsed ? "w-[64px]" : "w-[248px]",
+        )}
+      >
+        {rail(collapsed)}
       </aside>
 
       {navOpen ? (
@@ -250,12 +316,17 @@ export function Shell({
             className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden"
           />
           <aside className="fixed inset-y-0 left-0 z-50 w-[268px] border-r border-edge bg-well md:hidden">
-            {rail}
+            {rail(false)}
           </aside>
         </>
       ) : null}
 
-      <div className="relative z-10 md:pl-[248px]">
+      <div
+        className={cn(
+          "relative z-10 transition-[padding] duration-200 ease-out",
+          collapsed ? "md:pl-[64px]" : "md:pl-[248px]",
+        )}
+      >
         <header className="sticky top-0 z-30 border-b border-edge bg-app/85 backdrop-blur-xl">
           <div className="flex h-14 items-center gap-3 px-4 md:px-6">
             <button
