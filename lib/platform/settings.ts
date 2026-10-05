@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { platformSettings } from "@/lib/schema";
+import { platformSettings, users } from "@/lib/schema";
 import { decryptSecret, maskKey } from "@/lib/crypto";
 
 /* Platform settings — the Admin page's backing store, one singleton row.
@@ -137,16 +137,33 @@ export async function resolveInfraToken(
 
 /* ———————————————————————— admin gate ———————————————————————— */
 
-/** Who may open /admin. Comma-separated emails in ADMIN_EMAILS; the first
-    account to exist also gets access so a fresh install is not locked out. */
-export function isAdminEmail(email: string | null | undefined): boolean {
+/** Who may open /admin.
+ *
+ *  ADMIN_EMAILS configured → exactly those emails, and nobody else.
+ *  ADMIN_EMAILS unset      → single-operator install: ONLY the first account
+ *    ever created is the operator.
+ *
+ *  The previous behaviour returned true for everyone when the list was unset,
+ *  which handed every new sign-up the Admin panel and the ability to promote
+ *  any account to Pro. That was a privilege-escalation bug. */
+export async function isAdminEmail(email: string | null | undefined): Promise<boolean> {
   if (!email) return false;
   const list = (process.env.ADMIN_EMAILS ?? "")
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
   if (list.length > 0) return list.includes(email.toLowerCase());
-  return true; // single-operator installs: no list configured
+
+  try {
+    const [first] = await db
+      .select({ email: users.email })
+      .from(users)
+      .orderBy(asc(users.createdAt))
+      .limit(1);
+    return !!first?.email && first.email.toLowerCase() === email.toLowerCase();
+  } catch {
+    return false; // fail closed: an unreadable user table grants nobody admin
+  }
 }
 
 /* ———————————————————————— safe view ———————————————————————— */

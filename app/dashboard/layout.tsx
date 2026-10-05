@@ -68,7 +68,7 @@ export default async function DashboardLayout({
       runs={recent}
       activeCount={activeCount}
       awaitingCount={awaitingCount}
-      isAdmin={isAdminEmail(email)}
+      isAdmin={await isAdminEmail(email)}
       providers={{ llm, search }}
     >
       {children}

@@ -15,7 +15,7 @@ import { isAdminEmail, updatePlatformData, type AgentId, type PlanId, type Provi
 
 async function requireAdmin() {
   const session = await auth();
-  if (!session?.user?.id || !isAdminEmail(session.user.email)) redirect("/login");
+  if (!session?.user?.id || !(await isAdminEmail(session.user.email))) redirect("/login");
   return session;
 }
 

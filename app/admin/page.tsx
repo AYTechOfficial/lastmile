@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
 export default async function AdminPage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
-  if (!isAdminEmail(session.user.email)) redirect("/dashboard");
+  if (!(await isAdminEmail(session.user.email))) redirect("/dashboard");
 
   const platform = await getPlatformData();
   const providers: SafeProvider[] = platform.providers.map(toSafeProvider);
