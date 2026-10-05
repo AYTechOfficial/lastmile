@@ -1,0 +1,332 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import {
+  AlertTriangle,
+  Cpu,
+  Globe,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  Plus,
+  Search,
+  Settings,
+  ShieldCheck,
+  X,
+} from "lucide-react";
+import { cn } from "@/lib/cn";
+import { Kbd, btn } from "@/components/kit";
+import { CommandPalette, type PaletteRun } from "./command-palette";
+import { signOutAction } from "@/app/actions/auth";
+
+export type ProviderLine = { id: string; label: string; configured: boolean; freeTier: string };
+
+const pad = (n: number) => "#" + String(n).padStart(4, "0");
+
+const NAV = [
+  { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
+  { href: "/dashboard/settings", label: "Settings", icon: Settings },
+];
+
+/* Admin is rendered separately and only when the server says this email is an
+   admin — the link must not exist in the DOM for anyone else. */
+const ADMIN_NAV = { href: "/admin", label: "Admin", icon: ShieldCheck };
+
+/* The app shell: a fixed rail, a sticky context bar, and a command palette.
+   The rail is information, not decoration — it carries what is running right
+   now, which is the only thing worth putting in permanent chrome. */
+export function Shell({
+  name,
+  email,
+  runs,
+  activeCount,
+  awaitingCount,
+  providers,
+  isAdmin,
+  children,
+}: {
+  name: string;
+  email: string;
+  runs: PaletteRun[];
+  activeCount: number;
+  awaitingCount: number;
+  providers: { llm: ProviderLine[]; search: ProviderLine[] };
+  isAdmin: boolean;
+  children: React.ReactNode;
+}) {
+  const pathname = usePathname();
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const closeNav = () => setNavOpen(false);
+
+  const crumb = useMemo(() => {
+    if (pathname === "/dashboard") return "Overview";
+    if (pathname.startsWith("/dashboard/settings")) return "Settings";
+    if (pathname.startsWith("/admin")) return "Admin";
+    const match = runs.find((r) => pathname.includes(r.id));
+    return match ? pad(match.runNumber) + " · " + match.title : "Run";
+  }, [pathname, runs]);
+
+  const liveLlm = providers.llm.filter((p) => p.configured);
+  const liveSearch = providers.search.find((p) => p.configured);
+
+  const rail = (
+    <div className="flex h-full flex-col">
+      <div className="flex h-14 shrink-0 items-center justify-between px-4">
+        <Link href="/dashboard" onClick={closeNav} className="group flex items-center gap-2.5">
+          <span className="flex h-7 w-7 items-center justify-center rounded-[9px] border border-brand/40 bg-brand/12 transition-colors group-hover:bg-brand/20">
+            <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5">
+              <path
+                d="M4 13.5 9.5 19 20 6.5"
+                stroke="#7c7aff"
+                strokeWidth="2.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+          <span className="display text-[15px] font-semibold tracking-tight text-t1">
+            lastmile<span className="text-brand">.</span>
+          </span>
+        </Link>
+        <button
+          type="button"
+          onClick={() => setNavOpen(false)}
+          className="text-t3 hover:text-t1 md:hidden"
+          aria-label="Close navigation"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="px-3">
+        <Link href="/dashboard#compose" onClick={closeNav} className={btn("brand", "md", "w-full")}>
+          <Plus className="h-4 w-4" />
+          New run
+        </Link>
+      </div>
+
+      <nav className="mt-5 space-y-0.5 px-3">
+        {[...NAV, ...(isAdmin ? [ADMIN_NAV] : [])].map((item) => {
+          const active = item.href === "/dashboard" ? pathname === item.href : pathname.startsWith(item.href);
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={closeNav}
+              className={cn(
+                "flex items-center gap-2.5 rounded-[10px] px-3 py-2 text-[13px] transition-colors",
+                active ? "bg-surface2 font-medium text-t1" : "text-t2 hover:bg-surface2/60 hover:text-t1",
+              )}
+            >
+              <item.icon className={cn("h-4 w-4", active ? "text-brand" : "text-t3")} />
+              {item.label}
+              {active ? <span className="ml-auto h-1 w-1 rounded-full bg-brand" /> : null}
+            </Link>
+          );
+        })}
+      </nav>
+
+      <div className="mt-6 flex min-h-0 flex-1 flex-col px-3">
+        <div className="flex min-h-[18px] items-center justify-between gap-2 px-1.5 pb-2">
+          <span className="eyebrow">Runs</span>
+          <span className="flex items-center gap-2.5">
+            {awaitingCount > 0 ? (
+              <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-warn">
+                {awaitingCount} waiting on you
+              </span>
+            ) : null}
+            {activeCount > 0 ? (
+              <span className="flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-brand">
+                <span className="live-dot h-1.5 w-1.5" />
+                {activeCount} live
+              </span>
+            ) : null}
+          </span>
+        </div>
+
+        <div className="thin-scroll min-h-0 flex-1 overflow-y-auto pb-2">
+          {runs.length === 0 ? (
+            <p className="px-1.5 py-2 text-[12px] leading-relaxed text-t3">
+              Runs appear here the moment you start one.
+            </p>
+          ) : (
+            runs.map((r) => {
+              const active = pathname.includes(r.id);
+              return (
+                <Link
+                  key={r.id}
+                  href={"/dashboard/runs/" + r.id}
+                  onClick={closeNav}
+                  className={cn(
+                    "block rounded-[10px] px-2.5 py-2 transition-colors",
+                    active ? "bg-surface2" : "hover:bg-surface2/60",
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="tnum shrink-0 font-mono text-[9.5px] text-t3">{pad(r.runNumber)}</span>
+                    <span className="min-w-0 flex-1 truncate text-[12px] text-t2">{r.title}</span>
+                  </div>
+                  <p
+                    className={cn(
+                      "mt-1 pl-[38px] font-mono text-[9px] uppercase tracking-[0.12em]",
+                      r.status === "awaiting_approval"
+                        ? "text-warn"
+                        : r.status === "done"
+                          ? "text-pass"
+                          : r.status === "failed"
+                            ? "text-bad"
+                            : ["queued", "researching", "spec", "building", "deploying", "verifying", "prompting", "coding", "reviewing", "testing"].includes(r.status)
+                              ? "text-brand"
+                              : r.status === "fixing"
+                                ? "text-warn"
+                                : "text-t3",
+                    )}
+                  >
+                    {r.status.replace(/_/g, " ")}
+                  </p>
+                </Link>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      <div className="shrink-0 border-t border-edge p-3">
+        <div className="flex items-center gap-2.5 px-1.5 py-1.5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand/50 to-info/30 text-[11px] font-semibold text-white">
+            {name.slice(0, 1).toUpperCase()}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[12.5px] font-medium text-t1">{name}</p>
+            <p className="truncate font-mono text-[9.5px] text-t3">{email}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void signOutAction()}
+            title="Sign out"
+            aria-label="Sign out"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-t3 transition-colors hover:bg-surface2 hover:text-bad"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-app text-t1">
+      {/* ambient structure — one grid, no glow */}
+      <div aria-hidden className="pointer-events-none fixed inset-0 z-0">
+        <div className="rule-grid absolute inset-0 opacity-40 [mask-image:radial-gradient(ellipse_70%_50%_at_50%_0%,black,transparent_75%)]" />
+        <div className="absolute -top-40 left-1/2 h-[420px] w-[900px] -translate-x-1/2 rounded-full bg-brand/[0.06] blur-[140px]" />
+      </div>
+
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] border-r border-edge bg-well/80 backdrop-blur-xl md:block">
+        {rail}
+      </aside>
+
+      {navOpen ? (
+        <>
+          <button
+            type="button"
+            aria-label="Close navigation"
+            onClick={() => setNavOpen(false)}
+            className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden"
+          />
+          <aside className="fixed inset-y-0 left-0 z-50 w-[268px] border-r border-edge bg-well md:hidden">
+            {rail}
+          </aside>
+        </>
+      ) : null}
+
+      <div className="relative z-10 md:pl-[248px]">
+        <header className="sticky top-0 z-30 border-b border-edge bg-app/85 backdrop-blur-xl">
+          <div className="flex h-14 items-center gap-3 px-4 md:px-6">
+            <button
+              type="button"
+              onClick={() => setNavOpen(true)}
+              className="flex h-8 w-8 items-center justify-center rounded-[9px] border border-edge text-t2 md:hidden"
+              aria-label="Open navigation"
+            >
+              <Menu className="h-4 w-4" />
+            </button>
+
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="eyebrow hidden sm:inline">Workspace</span>
+              <span className="hidden text-t3 sm:inline">/</span>
+              <span className="min-w-0 truncate text-[13.5px] font-medium text-t1">{crumb}</span>
+            </div>
+
+            <div className="ml-auto flex items-center gap-2">
+              <EngineChips llm={liveLlm} search={liveSearch} />
+              <button
+                type="button"
+                onClick={() => setPaletteOpen(true)}
+                className="flex h-8 items-center gap-2 rounded-[9px] border border-edge bg-surface px-2.5 text-[12px] text-t3 transition-colors hover:border-edge2 hover:text-t2"
+              >
+                <Search className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Search</span>
+                <span className="hidden items-center gap-0.5 sm:flex">
+                  <Kbd>⌘</Kbd>
+                  <Kbd>K</Kbd>
+                </span>
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <main className="mx-auto w-full max-w-[1180px] px-4 py-6 md:px-8 md:py-8">{children}</main>
+      </div>
+
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} runs={runs} />
+    </div>
+  );
+}
+
+/* What the pipeline is actually running on. If nothing is configured this is
+   the most useful thing on the screen, so it says so instead of hiding. */
+function EngineChips({ llm, search }: { llm: ProviderLine[]; search?: ProviderLine }) {
+  if (llm.length === 0) {
+    return (
+      <Link
+        href="/dashboard/settings"
+        className="flex h-8 shrink-0 items-center gap-2 whitespace-nowrap rounded-[9px] border border-warn/30 bg-warn/10 px-2.5 text-[12px] text-warn transition-colors hover:bg-warn/15"
+      >
+        <AlertTriangle className="h-3.5 w-3.5" />
+        <span className="hidden sm:inline">No model key — running degraded</span>
+        <span className="sm:hidden">Degraded</span>
+      </Link>
+    );
+  }
+
+  return (
+    <div className="hidden items-center gap-1.5 lg:flex">
+      <span className="flex h-8 items-center gap-2 rounded-[9px] border border-edge bg-surface px-2.5 text-[11.5px] text-t2">
+        <Cpu className="h-3.5 w-3.5 text-brand" />
+        <span className="font-mono text-[10.5px] tracking-wide">{llm.map((p) => p.label).join(" · ")}</span>
+      </span>
+      {search ? (
+        <span className="flex h-8 items-center gap-2 rounded-[9px] border border-edge bg-surface px-2.5 text-[11.5px] text-t2">
+          <Globe className="h-3.5 w-3.5 text-info" />
+          <span className="font-mono text-[10.5px] tracking-wide">{search.label}</span>
+        </span>
+      ) : null}
+    </div>
+  );
+}
