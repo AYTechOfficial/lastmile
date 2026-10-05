@@ -22,6 +22,9 @@ export const users = pgTable("user", {
   image: text("image"),
   passwordHash: text("password_hash"),
   plan: text("plan").notNull().default("free"), // free | pro
+  /** which GitHub identity hosts this user's generated code:
+   *  auto = linked account if present, else the platform-hosted account */
+  githubHost: text("github_host").notNull().default("auto"), // auto | account | platform
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
