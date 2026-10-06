@@ -16,7 +16,8 @@
     "ci:secrets": "node scripts/set-ci-secrets.mjs",
     "verify:queue": "tsx scripts/verify-queue.mts",
     "verify:credentials": "tsx scripts/verify-credentials.mts",
-    "verify:pipeline": "tsx scripts/verify-pipeline.mts"
+    "verify:pipeline": "tsx scripts/verify-pipeline.mts",
+    "verify:wake": "tsx scripts/verify-wake.mts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.3",
