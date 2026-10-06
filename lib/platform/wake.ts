@@ -27,7 +27,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../db";
 import { reclaimStale } from "../queue";
-import { dispatchRunner, runnerConfigured, runnerWorkflowRunsInFlight } from "./runner";
+import { dispatchRunnerDetail, runnerConfigured, runnerWorkflowRunsInFlight } from "./runner";
 
 export type SweepResult = {
   /** jobs handed back to the queue because their runner stopped beating */
@@ -107,16 +107,16 @@ export async function sweepAndWake(): Promise<SweepResult> {
     };
   }
 
-  const dispatched = await dispatchRunner();
+  const outcome = await dispatchRunnerDetail();
 
   return {
     reclaimed,
     claimable,
     liveRunners,
     runsInFlight: inFlight,
-    dispatched,
-    reason: dispatched
+    dispatched: outcome.ok,
+    reason: outcome.ok
       ? `${claimable} job(s) waiting and no runner awake — woke one`
-      : `${claimable} job(s) waiting; the dispatch failed and the next sweep will retry`,
+      : `${claimable} job(s) waiting; wake failed — ${outcome.detail} (the next sweep retries)`,
   };
 }

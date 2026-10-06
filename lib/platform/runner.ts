@@ -27,15 +27,29 @@ export function runnerConfigured(): boolean {
   );
 }
 
-/** POST a workflow_dispatch at the platform repo's runner workflow.
-    Fire-and-forget by design; the caller awaits it only to keep ordering tidy. */
-export async function dispatchRunner(input: DispatchInput = {}): Promise<boolean> {
+export type DispatchOutcome = {
+  ok: boolean;
+  /** What went wrong, in words — carried straight into the sweep's response so
+      a failure in production is diagnosable without a log console. */
+  detail: string;
+};
+
+/** POST a workflow_dispatch at the platform repo's runner workflow, and say why
+    it failed when it does.
+
+    The detail matters more than it looks. This runs inside a serverless
+    function where nobody is watching stdout, so a boolean that merely reads
+    `false` turns a 401, a missing Actions permission and an unreachable network
+    into the same unhelpful answer. Fire-and-forget is still the contract for
+    callers that do not care; `dispatchRunner` is that contract. */
+export async function dispatchRunnerDetail(input: DispatchInput = {}): Promise<DispatchOutcome> {
   const repo = process.env.RUNNER_REPO?.trim(); // "owner/name"
   const token = (process.env.RUNNER_TOKEN ?? process.env.GITHUB_TOKEN ?? "").trim();
   const workflow = process.env.RUNNER_WORKFLOW?.trim() || "runner.yml";
   const ref = process.env.RUNNER_REF?.trim() || "main";
 
-  if (!repo || !token) return false;
+  if (!repo) return { ok: false, detail: "RUNNER_REPO is not configured" };
+  if (!token) return { ok: false, detail: "no GitHub token is configured for dispatching" };
 
   try {
     const res = await fetch(`${API}/repos/${repo}/actions/workflows/${workflow}/dispatches`, {
@@ -56,14 +70,27 @@ export async function dispatchRunner(input: DispatchInput = {}): Promise<boolean
     });
 
     if (!res.ok) {
+      const detail =
+        res.status === 401 || res.status === 403
+          ? `GitHub rejected the token with HTTP ${res.status} — it needs Actions read/write on ${repo}`
+          : res.status === 404
+            ? `GitHub answered HTTP 404 for ${repo}/${workflow} — wrong repo/workflow, or the token cannot see Actions on it`
+            : `GitHub answered HTTP ${res.status} for ${workflow}`;
       console.error("runner dispatch rejected", { status: res.status, repo, workflow });
-      return false;
+      return { ok: false, detail };
     }
-    return true;
+    return { ok: true, detail: `dispatched ${repo}/${workflow}` };
   } catch (error) {
+    const detail = `could not reach GitHub: ${error instanceof Error ? error.message : String(error)}`;
     console.error("runner dispatch failed", { repo, workflow, error });
-    return false;
+    return { ok: false, detail };
   }
+}
+
+/** POST a workflow_dispatch at the platform repo's runner workflow.
+    Fire-and-forget by design; the caller awaits it only to keep ordering tidy. */
+export async function dispatchRunner(input: DispatchInput = {}): Promise<boolean> {
+  return (await dispatchRunnerDetail(input)).ok;
 }
 
 /** How many runner workflow runs GitHub currently considers awake or waiting.
