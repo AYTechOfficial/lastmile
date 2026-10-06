@@ -13,7 +13,8 @@
     "db:seed": "node scripts/db-seed.mjs",
     "db:inspect": "node scripts/db-inspect.mjs",
     "verify:queue": "tsx scripts/verify-queue.mts",
-    "verify:credentials": "tsx scripts/verify-credentials.mts"
+    "verify:credentials": "tsx scripts/verify-credentials.mts",
+    "verify:pipeline": "tsx scripts/verify-pipeline.mts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.3",

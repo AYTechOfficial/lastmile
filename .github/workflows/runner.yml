@@ -1,0 +1,79 @@
+name: runner
+
+# The pipeline runner.
+#
+# Two ways in, and they exist for different reasons:
+#
+#   workflow_dispatch — the dashboard wakes a runner the moment a job is queued,
+#     so a Run click starts work in seconds.
+#
+#   schedule — a safety net every five minutes. If a dispatch is lost, a runner
+#     dies mid-job, or a lease expires, this picks the work back up. Nothing can
+#     be stranded in the queue, which is the property the previous build lacked.
+#
+# The workflow must live on the DEFAULT branch for GitHub to dispatch or
+# schedule it at all, whatever ref you ask it to run from.
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "Specific job to claim (omit to take the next queued job)"
+        required: false
+        type: string
+  schedule:
+    # Every five minutes. GitHub's minimum granularity, and it auto-disables
+    # scheduled workflows after 60 days without repository activity.
+    - cron: "*/5 * * * *"
+
+# One runner at a time per job batch. Concurrent runners are safe — claiming
+# uses FOR UPDATE SKIP LOCKED — but serialising the scheduled sweep keeps the
+# free minutes honest.
+concurrency:
+  group: lastmile-runner
+  cancel-in-progress: false
+
+permissions:
+  contents: write # commit generated code back to the project repo
+  actions: write # dispatch the next stage
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Claim and run one job
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+
+          # Platform model credentials for the free tier
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+
+          # Search and live QA
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          BROWSER_USE_API_KEY: ${{ secrets.BROWSER_USE_API_KEY }}
+
+          # Repos and deploys
+          GITHUB_TOKEN: ${{ secrets.PLATFORM_GITHUB_TOKEN }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+
+          # Wake a fresh runner for the next stage without waiting for the cron
+          RUNNER_REPO: ${{ github.repository }}
+          RUNNER_REF: ${{ github.ref_name }}
+          WORKER_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
+        run: npx tsx runner/index.mts ${{ inputs.job_id && format('--job {0}', inputs.job_id) || '' }}
