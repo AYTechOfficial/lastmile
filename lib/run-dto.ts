@@ -122,8 +122,17 @@ export function fmtDuration(ms: number | null | undefined): string {
   return rem > 0 ? m + "m " + rem + "s" : m + "m";
 }
 
+/** Clock text for the log, rendered in UTC on purpose.
+
+    `toLocaleTimeString` renders the server's timezone when the server renders
+    and the browser's when the browser hydrates — the same event would show two
+    different times (Vercel runs UTC, a user in India is UTC+5:30), and React
+    reports a hydration mismatch for the difference. UTC is the one zone both
+    sides agree on without being told, and it is also the timezone the CI logs
+    these lines are read against. */
 export function fmtClock(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour12: false });
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "--:--:--" : d.toISOString().slice(11, 19);
 }
 
 export function fmtRelative(iso: string, now = Date.now()): string {
