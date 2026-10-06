@@ -12,6 +12,8 @@
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:seed": "node scripts/db-seed.mjs",
     "db:inspect": "node scripts/db-inspect.mjs",
+    "run:inspect": "tsx scripts/run-inspect.mts",
+    "ci:secrets": "node scripts/set-ci-secrets.mjs",
     "verify:queue": "tsx scripts/verify-queue.mts",
     "verify:credentials": "tsx scripts/verify-credentials.mts",
     "verify:pipeline": "tsx scripts/verify-pipeline.mts"
@@ -44,6 +46,7 @@
     "drizzle-kit": "^0.31.11",
     "eslint": "^9",
     "eslint-config-next": "16.3.6",
+    "libsodium-wrappers": "^0.8.4",
     "postcss": "^8",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",

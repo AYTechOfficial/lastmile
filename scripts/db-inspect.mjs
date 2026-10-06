@@ -54,16 +54,19 @@ try {
   console.log();
 
   /* Row counts on the tables that hold real user data — the ones a careless
-     migration would hurt. */
+     migration would hurt. Every user schema, not just public: the previous
+     build's data still lives in public and must not be mistaken for ours. */
   console.log("row counts:");
-  for (const name of ["user", "account", "session", "runs", "run_events", "jobs"]) {
-    try {
-      const [{ n }] = await sql`
-        select count(*)::int as n from ${sql("public")}.${sql(name)}
-      `;
-      console.log(`  public.${name}: ${n}`);
-    } catch {
-      console.log(`  public.${name}: (does not exist)`);
+  for (const schema of userSchemas) {
+    for (const name of ["user", "account", "session", "runs", "run_events", "jobs"]) {
+      try {
+        const [{ n }] = await sql`
+          select count(*)::int as n from ${sql(schema)}.${sql(name)}
+        `;
+        console.log(`  ${schema}.${name}: ${n}`);
+      } catch {
+        /* table absent in this schema */
+      }
     }
   }
   console.log();
