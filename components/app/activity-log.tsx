@@ -32,6 +32,20 @@ export function ActivityLog({
   const ref = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState(true);
 
+  /* The prompt-line clock. It must not be computed during the server render:
+     the server's second and the browser's second are different, and React
+     reports a hydration mismatch for the difference. Null until the client has
+     mounted, so both renders agree on the placeholder and the real time lands
+     a tick later. */
+  const [clock, setClock] = useState<string | null>(null);
+
+  useEffect(() => {
+    const tick = () => setClock(new Date().toISOString());
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
+
   useEffect(() => {
     const el = ref.current;
     if (!el || !pinned) return;
@@ -124,7 +138,7 @@ export function ActivityLog({
 
         {live ? (
           <p className="flex gap-3 text-t3">
-            <span className="tnum shrink-0 text-t3/40">{fmtClock(new Date().toISOString())}</span>
+            <span className="tnum shrink-0 text-t3/40">{clock ? fmtClock(clock) : "--:--:--"}</span>
             <span className="caret-inline" />
           </p>
         ) : null}
