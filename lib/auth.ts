@@ -1,0 +1,99 @@
+import NextAuth from "next-auth";
+import Credentials from "next-auth/providers/credentials";
+import GitHub from "next-auth/providers/github";
+import { DrizzleAdapter } from "@auth/drizzle-adapter";
+import bcrypt from "bcryptjs";
+import { eq } from "drizzle-orm";
+import { db } from "./db";
+import { accounts, sessions, users, verificationTokens } from "./schema";
+import { planOf, type PlanId } from "./plans";
+
+/* Auth.js v5.
+
+   JWT sessions rather than database sessions: the credentials provider requires
+   them, and they also mean a signed-in request costs no extra round trip — which
+   matters on a serverless host where every query is a connection.
+
+   PLAN ON THE SESSION is deliberate. The plan decides which model tier a run may
+   route to and how many iterations its quality loop gets. Resolving it from the
+   session at the point of use keeps that decision server-side, where a client
+   cannot escalate it. */
+
+export const { handlers, auth, signIn, signOut } = NextAuth({
+  adapter: DrizzleAdapter(db, {
+    usersTable: users,
+    accountsTable: accounts,
+    sessionsTable: sessions,
+    verificationTokensTable: verificationTokens,
+  }),
+  session: { strategy: "jwt" },
+  pages: { signIn: "/login" },
+  providers: [
+    GitHub({
+      clientId: process.env.AUTH_GITHUB_ID,
+      clientSecret: process.env.AUTH_GITHUB_SECRET,
+      /* Reading the user's verified email address is what lets a GitHub sign-in
+         match an existing password account instead of creating a second one. */
+      allowDangerousEmailAccountLinking: true,
+    }),
+    Credentials({
+      name: "Email and password",
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" },
+      },
+      async authorize(raw) {
+        const email = String(raw?.email ?? "").trim().toLowerCase();
+        const password = String(raw?.password ?? "");
+        if (!email || !password) return null;
+
+        const [user] = await db
+          .select({
+            id: users.id,
+            email: users.email,
+            name: users.name,
+            image: users.image,
+            passwordHash: users.passwordHash,
+            plan: users.plan,
+          })
+          .from(users)
+          .where(eq(users.email, email))
+          .limit(1);
+
+        if (!user?.passwordHash) return null;
+
+        const ok = await bcrypt.compare(password, user.passwordHash);
+        if (!ok) return null;
+
+        return { id: user.id, email: user.email, name: user.name, image: user.image };
+      },
+    }),
+  ],
+  callbacks: {
+    jwt({ token, user }) {
+      if (user?.id) token.uid = user.id;
+      return token;
+    },
+    session({ session, token }) {
+      if (session.user && typeof token.uid === "string") {
+        session.user.id = token.uid;
+      }
+      return session;
+    },
+  },
+});
+
+/** Operators allowed into /admin, from the environment. */
+export function isAdminEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const list = (process.env.ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  return list.includes(email.toLowerCase());
+}
+
+/** The plan a session is entitled to. */
+export function sessionPlan(plan: string | null | undefined): PlanId {
+  return planOf(plan).id;
+}
