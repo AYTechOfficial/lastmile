@@ -260,8 +260,20 @@ async function main(): Promise<void> {
   const payload = { ...next.payload };
   if (next.kind === "code" && next.payload?.fixOnly) {
     /* A fix round is scoped to the files the defects actually name, so a small
-       defect cannot rewrite a working codebase. */
-    payload.files = filesToRepatch(await openIssues(run.id));
+       defect cannot rewrite a working codebase. The ledger itself rides along:
+       a fixer told only the file paths is a fixer told to guess, and every
+       guess it gets wrong costs a whole round of the budget. */
+    const open = await openIssues(run.id);
+    payload.files = filesToRepatch(open);
+    payload.issuesText = open
+      .slice(0, 12)
+      .map(
+        (i) =>
+          `[${i.severity}] ${i.title}${i.files?.length ? ` (files: ${i.files.join(", ")})` : ""}` +
+          (i.detail ? `\n    ${i.detail.replace(/\s+/g, " ").slice(0, 700)}` : ""),
+      )
+      .join("\n\n")
+      .slice(0, 4_000);
   }
 
   if (next.kind === "code") {

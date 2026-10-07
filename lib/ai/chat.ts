@@ -90,6 +90,40 @@ export type ChatInput = {
 
 const DEFAULT_TIMEOUT = 90_000;
 const DEFAULT_MAX_RUNGS = 12;
+
+/* ————————————————————————— what the chain has learned —————————————————————————
+
+   Two memories, both in-process and both deliberately cheap. A model that just
+   returned 404 has been retired and will never answer again today; a model that
+   returned 429 is out of quota for a few minutes; a provider that answered
+   once is a better first guess than a benchmark measured weeks ago. Without
+   these, every stage re-walks the same dead rungs — a stale measured order
+   puts a retired model first, every call pays for it, and the stage lands on
+   whichever slow model happens to sit behind it. */
+
+/** rungs to skip for a while, keyed `provider|model` */
+const cooldown = new Map<string, { until: number; status: number }>();
+
+/** the last rung that actually answered, keyed by tier + agent */
+const lastGood = new Map<string, string>();
+
+function rungKey(rung: { id: string; model: string }): string {
+  return `${rung.id}|${rung.model}`;
+}
+
+/** How long a failure should keep a rung out of the chain. A retired model is
+    a fact about the catalog (hours); a quota is a fact about the minute;
+    everything else gets one short breath. */
+function cooldownMs(status: number, detail: string | undefined): number {
+  if (status === 404 || status === 410) return 6 * 60 * 60 * 1000;
+  if (status === 401 || status === 403) return 30 * 60 * 1000;
+  if (status === 429) return 2 * 60 * 1000;
+  if (status >= 500) return 2 * 60 * 1000;
+  /* a 400 from a content filter is deterministic for the same request, but the
+     next request is usually different — keep the penalty short and local */
+  if (/sensitive|content.?filter|policy/i.test(detail ?? "")) return 5 * 60 * 1000;
+  return 30 * 1000;
+}
 /* Two models per provider is enough to tell a broken catalog from a broken
    request: a provider that answers for one model and 500s for another is worth
    keeping in the chain, one that 500s twice is not. */
@@ -122,7 +156,7 @@ type Rung = {
 
     A user's own endpoint outranks the platform's at every step, because they
     are paying for it. */
-async function buildRungs(input: ChatInput): Promise<Rung[]> {
+async function buildRungs(input: ChatInput): Promise<{ rungs: Rung[]; pinned: boolean }> {
   const rungs: Rung[] = [];
   const preferred = input.preferred?.trim() || null;
 
@@ -181,9 +215,11 @@ async function buildRungs(input: ChatInput): Promise<Rung[]> {
   /* Rung group 2 — the platform catalog for this plan tier, ordered by the
      operator's own priority rather than by array position. */
   const platform = await resolveProviders(input.tier);
+  let pinned = false;
   for (const p of platform) {
-    const pinned = input.agent ? p.agents[input.agent] : undefined;
-    push(p, orderModels(p.models, preferredModel, pinned), p.priority);
+    const pinnedModel = input.agent ? p.agents[input.agent] : undefined;
+    if (pinnedModel) pinned = true;
+    push(p, orderModels(p.models, preferredModel, pinnedModel), p.priority);
   }
 
   /* Resolve the qualifier now that every provider id is known, then lift the
@@ -198,7 +234,7 @@ async function buildRungs(input: ChatInput): Promise<Rung[]> {
   }
 
   rungs.sort((a, b) => b.rank - a.rank);
-  return rungs;
+  return { rungs, pinned };
 }
 
 /** Put the interesting models first, keep the rest behind them as fallback.
@@ -416,7 +452,8 @@ export async function chat(input: ChatInput, messages: ChatMessage[]): Promise<C
   const maxRungs = input.maxRungs ?? DEFAULT_MAX_RUNGS;
   const perProviderRungs = input.perProviderRungs ?? DEFAULT_PER_PROVIDER_RUNGS;
 
-  const rungs = await buildRungs(input);
+  const built = await buildRungs(input);
+  let rungs = built.rungs;
 
   if (rungs.length === 0) {
     return {
@@ -433,11 +470,43 @@ export async function chat(input: ChatInput, messages: ChatMessage[]): Promise<C
     };
   }
 
+  /* A model that answered a moment ago is the best first guess: the benchmark
+     order behind it may name models this provider has since retired, and every
+     one of those is a wasted call in the middle of a stage. The promotion is
+     tier-wide as well as agent-wide — a model proven by the prompt stage is a
+     good first guess for the coder — and it never outranks an agent the
+     operator has pinned, whose whole point is a stable output run to run. */
+  const agentKey = `${input.tier}|${input.agent ?? "any"}`;
+  const tierKey = `${input.tier}|any`;
+  const remembered = lastGood.get(agentKey) ?? lastGood.get(tierKey);
+  if (
+    !built.pinned &&
+    remembered &&
+    rungs.length > 1 &&
+    rungs[0] &&
+    rungKey(rungs[0]) !== remembered
+  ) {
+    const i = rungs.findIndex((r) => rungKey(r) === remembered);
+    if (i > 0) rungs = [rungs[i]!, ...rungs.slice(0, i), ...rungs.slice(i + 1)];
+  }
+
+  /* Cooled-down rungs sit behind the healthy ones — but they are never removed
+     outright. If everything is cold, trying them beats failing without trying. */
+  const now = Date.now();
+  const healthy = rungs.filter((r) => (cooldown.get(rungKey(r))?.until ?? 0) <= now);
+  const cold = rungs.filter((r) => (cooldown.get(rungKey(r))?.until ?? 0) > now);
+  const ordered = [...healthy, ...cold];
+  if (cold.length > 0 && healthy.length > 0) {
+    const n = cold.length;
+    const why = cooldown.get(rungKey(cold[0]!))?.status;
+    console.log(`chat: ${n} rung(s) in cooldown behind ${healthy.length} healthy (first cold status ${why})`);
+  }
+
   const tried: Rung[] = [];
   const perProvider = new Map<string, number>();
   let lastDetail = "no rung answered";
 
-  for (const rung of rungs) {
+  for (const rung of ordered) {
     if (tried.length >= maxRungs) break;
 
     /* Skip a (provider, model) pair already tried: `orderModels` can place the
@@ -470,6 +539,9 @@ export async function chat(input: ChatInput, messages: ChatMessage[]): Promise<C
     if (input.onAttempt) await input.onAttempt(attempt);
 
     if (result.ok) {
+      cooldown.delete(rungKey(rung));
+      lastGood.set(agentKey, rungKey(rung));
+      lastGood.set(tierKey, rungKey(rung));
       return {
         ok: true,
         text: result.text,
@@ -482,6 +554,10 @@ export async function chat(input: ChatInput, messages: ChatMessage[]): Promise<C
       };
     }
 
+    cooldown.set(rungKey(rung), {
+      until: Date.now() + cooldownMs(result.status, result.detail),
+      status: result.status,
+    });
     lastDetail = `${rung.label}/${rung.model}: ${result.detail ?? "failed"}`;
   }
 

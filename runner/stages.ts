@@ -186,6 +186,9 @@ const code: StageExecutor = async (ctx) => {
   /* A deploy failure hands the coder Vercel's own error, so the fix round
      patches the exact files the platform build rejected. */
   const deployError = typeof ctx.payload.deployError === "string" ? (ctx.payload.deployError as string) : null;
+  /* The open defect ledger, formatted by the runner when it enqueued this fix
+     round — titles, severities and the exact build diagnostics. */
+  const issuesText = typeof ctx.payload.issuesText === "string" ? (ctx.payload.issuesText as string) : null;
 
   const result = await runCoder({
     sentence: ctx.run.sentence,
@@ -199,6 +202,7 @@ const code: StageExecutor = async (ctx) => {
     firstPass,
     files,
     deployError,
+    issuesText,
     iteration: ctx.iteration,
     emit: ctx.emit,
     heartbeat: ctx.heartbeat,

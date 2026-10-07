@@ -89,16 +89,33 @@ export const AION_MODELS: CatalogModel[] = [
   { id: "aion-labs/aion-2.0", tps: 2.1, latencyMs: 2150 },
 ];
 
-/** Just the ids, in failover order. This is what the provider catalog stores. */
-export const TRUE_MODEL_IDS: string[] = TRUE_MODELS.map((m) => m.id);
+/** Just the ids, in failover order. This is what the provider catalog stores.
+
+    The retired set is a fact learned from the provider, not from the probe:
+    gemini-2.5-flash measured fastest on 2026-10-07 and answered 404 the very
+    next day ("no longer available to new users"). A catalog that lists a model
+    the provider will not serve spends a rung on every call to prove it. */
+const RETIRED = new Set<string>(["gemini-2.5-flash"]);
+
+export const TRUE_MODEL_IDS: string[] = TRUE_MODELS.filter((m) => !RETIRED.has(m.id)).map((m) => m.id);
 export const HCNSEC_MODEL_IDS: string[] = HCNSEC_MODELS.map((m) => m.id);
 export const AION_MODEL_IDS: string[] = AION_MODELS.map((m) => m.id);
 
 /** The single model a run reaches for first when the user expressed no
-    preference: the fastest one that answered cleanly. Chosen rather than
-    hardcoded to index 0 so reordering the table reorders the default with it. */
+    preference.
+
+    Two gates, both learned the hard way: the model must not be retired, and it
+    must have real throughput (>= 40 t/s) — otherwise the fastest *first token*
+    would pick a trickle, and a trickle writing a 400-line file holds the whole
+    stage open. Among the models that clear both, latency decides, because that
+    is what the run log is measured in: gemini-3.6-flash answered in 7–18s where
+    the higher-throughput qwen3.7 variants took 78–143s wall clock. */
 export const PREFERRED_FREE_MODEL: string =
-  TRUE_MODELS.find((m) => !m.partial)?.id ?? TRUE_MODEL_IDS[0];
+  TRUE_MODELS.filter((m) => !m.partial && !RETIRED.has(m.id) && m.tps >= 40)
+    .sort((a, b) => a.latencyMs - b.latencyMs)[0]?.id ??
+  TRUE_MODEL_IDS[0] ??
+  TRUE_MODELS[0]?.id ??
+  "";
 
 /** Human-readable one-liner for the run-start picker. */
 export function describeModel(m: CatalogModel): string {

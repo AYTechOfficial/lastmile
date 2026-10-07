@@ -30,7 +30,7 @@
 
 import type { MasterBuildPrompt, ProductSpec } from "../domain";
 import { chatJson, defaultModelFor, type ChatInput } from "../ai/chat";
-import { commitFiles, ensureRepo, latestSha } from "../platform/github";
+import { commitFiles, ensureRepo, getRepoFile, latestSha } from "../platform/github";
 import type { PlanConfig } from "../plans";
 
 export type CodeInput = {
@@ -51,6 +51,9 @@ export type CodeInput = {
   /** the deployed platform's own build error, when the deploy stage bounced
       the run back — the most precise failure report the pipeline has */
   deployError?: string | null;
+  /** the open defect ledger (severity, title, files, diagnostics), carried from
+      the runner when it enqueued this fix round */
+  issuesText?: string | null;
   iteration: number;
   emit: (kind: "info" | "command" | "success" | "warn" | "error" | "url", line: string) => Promise<void>;
   heartbeat: () => Promise<void>;
@@ -256,10 +259,13 @@ function workPackages(input: CodeInput): { label: string; files: string[]; brief
 
   const flowCount = spec?.flows.length ?? 0;
   if (flowCount >= 3) {
+    /* No "shared components" package: components/ui.tsx is harness-owned and
+       already exists. A worker that wrote it would have to guess the API the
+       other workers are guessing at, and the guess only fails in type check. */
     packages.push({
-      label: "shared components",
-      files: ["components/ui.tsx"],
-      brief: "The shared UI pieces the other screens import — buttons, cards, list rows, empty states — matching the design system exactly.",
+      label: "shared widgets",
+      files: ["components/widgets.tsx"],
+      brief: `Product-specific pieces this app needs beyond the shared kit ("@/components/ui") — score panels, board cells, anything reused across screens. Never redefine Button, Card, Badge, EmptyState or ListRow; those exist and are imported from the kit.`,
     });
   }
 
@@ -369,7 +375,14 @@ STRICT RULES
 - Tailwind utility classes only.
 - Persistence: localStorage, key exactly "${key}" — the other screens read the same key, so the product works as one.
 - Shared record type (match this exactly): type Record = { id: string; title: string; notes: string; createdAt: string }.
-- If you import a shared component, import it from "@/components/ui" — that file is written by another worker with exports: Card, Button, EmptyState, ListRow.
+- The shared kit already exists at "@/components/ui" — harness-owned, so you may import from it but never rewrite it. Its exact API:
+    Button({ variant?: "primary" | "secondary" | "danger" | "outline" | "ghost" | "link", size?: "sm" | "md" | "lg", ...buttonProps })
+    Card({ className?, ...divProps })
+    Badge({ tone?: "brand" | "pass" | "warn" | "bad" | "neutral" })
+    EmptyState({ title?, message?, description?, icon?, action?, className? })
+    ListRow({ record?, title?, subtitle?, trailing?, className? })
+  Call them with exactly these props — any other prop name is a TypeScript error and fails the build.
+- Any other shared piece goes in "components/widgets.tsx" (your file) and must not re-export or shadow the kit's names.
 - Write REAL content for this specific product. No lorem ipsum, no placeholders, no TODOs.
 - Do not create any file not listed above.
 - Escape all newlines inside "content" correctly so the JSON parses.
@@ -402,11 +415,7 @@ async function askModel(
         `  model ${attempt.provider}/${attempt.model} ${attempt.ok ? "answered" : `failed (${attempt.detail ?? "unknown"})`} in ${Math.round(attempt.ms / 1000)}s`,
       );
     },
-  };
-
-  const prompt = input.firstPass
-    ? buildPrompt(input)
-    : fixPrompt(input);
+  };  const prompt = input.firstPass ? buildPrompt(input) : fixPrompt(input, await loadFixContext(input));
 
   const { value, result, parseError } = await chatJson<{ files?: GeneratedFile[] }>(chatInput, [
     {
@@ -442,8 +451,15 @@ STRICT RULES
 - Persistence: localStorage only. There is no backend and no database.
 - Write REAL content for this specific product. No lorem ipsum, no placeholders, no TODOs.
 - EVERY file must be COMPLETE from its first line to its last. A file that ends mid-function, mid-object or mid-JSX is a failed build. If you are running short on space, simplify styling and commentary — never stop before the file is finished and syntactically whole.
-- Do not create: package.json, tsconfig.json, next.config.mjs, postcss.config.mjs, app/layout.tsx, app/globals.css. Those already exist and are correct — any file you return with those paths is discarded.
+- Do not create: package.json, tsconfig.json, next.config.mjs, postcss.config.mjs, app/layout.tsx, app/globals.css, components/ui.tsx. Those already exist and are correct — any file you return with those paths is discarded.
 - Files you SHOULD write: app/page.tsx plus any routes in the spec, and components/ files for the parts that are reused.
+- The shared kit already exists at components/ui.tsx — import from "@/components/ui", never rewrite it. Its exact API:
+    Button({ variant?: "primary" | "secondary" | "danger" | "outline" | "ghost" | "link", size?: "sm" | "md" | "lg", ...buttonProps })
+    Card({ className?, ...divProps })
+    Badge({ tone?: "brand" | "pass" | "warn" | "bad" | "neutral" })
+    EmptyState({ title?, message?, description?, icon?, action?, className? })
+    ListRow({ record?, title?, subtitle?, trailing?, className? })
+  Calling them with any other prop name is a TypeScript error and fails the build.
 - Escape all newlines inside "content" correctly so the JSON parses.
 
 MASTER BUILD PROMPT
@@ -468,21 +484,75 @@ QUALITY BAR
 ${(master?.qualityBar ?? []).map((q) => `- ${q}`).join("\n")}`;
 }
 
-function fixPrompt(input: CodeInput): string {
+/** What a fix round has to see to stop guessing: the files it may change as
+    they exist in the repo right now, plus the shared kit they compile against.
+
+    The old prompt named the file paths and nothing else, so the fixer
+    regenerated page.tsx from memory of the master prompt — keeping some of it,
+    losing the rest, and turning one compile error into a different one. Round
+    after round, until the budget ran out. */
+async function loadFixContext(input: CodeInput): Promise<{
+  files: { path: string; content: string }[];
+  kit: string | null;
+}> {
+  if (!input.repo) return { files: [], kit: null };
+  const { owner, name } = input.repo;
+  const files: { path: string; content: string }[] = [];
+
+  let budget = 64_000;
+  for (const path of (input.files ?? []).slice(0, 6)) {
+    const content = await getRepoFile(owner, name, path);
+    if (!content) continue;
+    const clipped = content.slice(0, 24_000);
+    if (clipped.length > budget) break;
+    budget -= clipped.length;
+    files.push({ path, content: clipped });
+  }
+
+  const kit = await getRepoFile(owner, name, "components/ui.tsx");
+  return { files, kit: kit ? kit.slice(0, 14_000) : null };
+}
+
+function fixPrompt(
+  input: CodeInput,
+  context: { files: { path: string; content: string }[]; kit: string | null },
+): string {
+  const contents = context.files
+    .map(
+      (f) =>
+        `--- ${f.path} (current contents — preserve everything that is not defective) ---\n\n${f.content}`,
+    )
+    .join("\n\n");
+
   return `Fix defects in an existing Next.js product. Reply with ONLY:
 { "files": [ { "path": "...", "content": "<the complete corrected file>" } ] }
 
 Return the COMPLETE corrected contents of only the files that need changing — not a diff, not a fragment.
 A file that ends mid-function, mid-object or mid-JSX is a failed build — if space is tight, simplify styling, never cut logic.
-Do not create package.json, tsconfig.json, next.config.mjs, app/layout.tsx or app/globals.css.
+Do not create package.json, tsconfig.json, next.config.mjs, postcss.config.mjs, app/layout.tsx, app/globals.css or components/ui.tsx.
 Keep everything that already works; change only what the defects require.
-
+${input.issuesText ? `
+OPEN DEFECTS (the verifier's ledger — severity, the exact diagnostics, the files it names)
+${input.issuesText}
+` : ""}${input.deployError ? `
+DEPLOY FAILURE (the hosting platform rejected the build — fix what it names)
+${input.deployError.slice(0, 2000)}
+` : ""}
 FILES THE DEFECTS POINT AT
 ${(input.files ?? []).join("\n") || "(the defects did not name files — find them yourself)"}
-${input.deployError ? `
-DEPLOY FAILURE (the hosting platform rejected the build — fix what it names)
-${input.deployError.slice(0, 2000)}` : ""}
-
+${contents ? `
+${contents}
+` : ""}${context.kit ? `
+SHARED KIT (reference — harness-owned, import from "@/components/ui", never rewrite)
+${context.kit}
+` : `
+SHARED KIT API (components/ui.tsx is harness-owned — import it, never rewrite it)
+Button({ variant?: "primary" | "secondary" | "danger" | "outline" | "ghost" | "link", size?: "sm" | "md" | "lg" })
+Card({ className? })
+Badge({ tone?: "brand" | "pass" | "warn" | "bad" | "neutral" })
+EmptyState({ title?, message?, description?, icon?, action?, className? })
+ListRow({ record?, title?, subtitle?, trailing?, className? })
+`}
 MASTER BUILD PROMPT (the contract the code is held to)
 ${input.master?.instructions ?? input.sentence}`;
 }
@@ -490,7 +560,7 @@ ${input.master?.instructions ?? input.sentence}`;
 /* ————————————————————————— validation ————————————————————————— */
 
 const ALLOWED_EXT = /\.(tsx|ts|jsx|js|css|json|md)$/i;
-const FORBIDDEN = /(^|\/)(package\.json|package-lock\.json|tsconfig\.json|next\.config\.[a-z]+|postcss\.config\.[a-z]+|app\/layout\.tsx|app\/globals\.css)$/i;
+const FORBIDDEN = /(^|\/)(package\.json|package-lock\.json|tsconfig\.json|next\.config\.[a-z]+|postcss\.config\.[a-z]+|app\/layout\.tsx|app\/globals\.css|components\/ui\.tsx)$/i;
 
 /** Keep only files this agent is allowed to write. A model that returns a
     package.json would otherwise overwrite the scaffold and break the build —
@@ -529,6 +599,145 @@ function isScaffold(path: string): boolean {
 }
 
 /* ————————————————————————— the scaffold ————————————————————————— */
+
+/** The shared kit, written by the harness rather than by a model. */
+const UI_KIT = `/* The shared UI kit — harness-owned, like the scaffold around it.
+
+Parallel workers negotiate interfaces badly: one screen asks for
+variant=\"outline\" while the kit only defines three variants, and the app dies
+in type check. These signatures are fixed and every screen is told them
+exactly, so a prop name never costs a fix round. */
+
+import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
+
+export type ButtonVariant = "primary" | "secondary" | "danger" | "outline" | "ghost" | "link";
+export type ButtonSize = "sm" | "md" | "lg";
+export type Tone = "brand" | "pass" | "warn" | "bad" | "neutral";
+
+export function Button({
+  children,
+  variant = "primary",
+  size = "md",
+  className = "",
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  children?: ReactNode;
+}) {
+  const base = "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50";
+  const sizes: Record<ButtonSize, string> = {
+    sm: "h-8 px-3 text-xs",
+    md: "h-10 px-4 text-sm",
+    lg: "h-12 px-6 text-[15px]",
+  };
+  const variants: Record<ButtonVariant, string> = {
+    primary: "bg-[var(--accent)] text-black hover:opacity-90",
+    secondary: "bg-[var(--surface)] text-[var(--primary)] border border-white/10 hover:border-white/25",
+    danger: "bg-red-500/15 text-red-300 border border-red-500/40 hover:bg-red-500/25",
+    outline: "border border-white/25 text-[var(--primary)] hover:border-white/45 hover:bg-white/5",
+    ghost: "text-[var(--primary)] hover:bg-white/10",
+    link: "text-[var(--accent)] underline underline-offset-4 hover:opacity-80",
+  };
+
+  return (
+    <button
+      type="button"
+      className={base + " " + sizes[size] + " " + variants[variant] + " " + className}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+export function Card({ children, className = "", ...props }: HTMLAttributes<HTMLDivElement> & { children?: ReactNode }) {
+  return (
+    <div className={"rounded-xl border border-white/10 bg-[var(--surface)] p-4 " + className} {...props}>
+      {children}
+    </div>
+  );
+}
+
+export function Badge({ children, tone = "neutral", className = "" }: { children?: ReactNode; tone?: Tone; className?: string }) {
+  const tones: Record<Tone, string> = {
+    brand: "bg-[var(--accent)]/15 text-[var(--accent)] border-[var(--accent)]/30",
+    pass: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+    warn: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+    bad: "bg-red-500/15 text-red-300 border-red-500/30",
+    neutral: "bg-white/5 text-white/60 border-white/10",
+  };
+  return (
+    <span className={"inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium " + tones[tone] + " " + className}>
+      {children}
+    </span>
+  );
+}
+
+export function EmptyState({
+  title,
+  message,
+  description,
+  icon,
+  action,
+  className = "",
+}: {
+  title?: ReactNode;
+  message?: ReactNode;
+  description?: ReactNode;
+  icon?: ReactNode;
+  action?: ReactNode;
+  className?: string;
+}) {
+  const heading = title ?? message ?? "Nothing here yet";
+  const body = description ?? (title != null && message != null && message !== title ? message : null);
+  return (
+    <div className={"flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-white/15 bg-white/[0.02] px-6 py-10 text-center " + className}>
+      {icon ? <div className="text-white/50">{icon}</div> : null}
+      <p className="text-sm font-medium text-white/80">{heading}</p>
+      {body ? <p className="max-w-sm text-xs text-white/50">{body}</p> : null}
+      {action ? <div className="mt-1">{action}</div> : null}
+    </div>
+  );
+}
+
+export function ListRow({
+  record,
+  title,
+  subtitle,
+  trailing,
+  children,
+  className = "",
+}: {
+  record?: Record<string, unknown>;
+  title?: ReactNode;
+  subtitle?: ReactNode;
+  trailing?: ReactNode;
+  children?: ReactNode;
+  className?: string;
+}) {
+  const pick = (keys: string[]): string | null => {
+    if (!record) return null;
+    for (const k of keys) {
+      const v = record[k];
+      if (typeof v === "string" || typeof v === "number") return String(v);
+    }
+    return null;
+  };
+  const heading = title ?? pick(["title", "name", "label"]) ?? "Untitled";
+  const sub = subtitle ?? pick(["notes", "description", "subtitle", "createdAt"]);
+  const aside = trailing ?? children;
+  return (
+    <div className={"flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2.5 " + className}>
+      <div className="min-w-0">
+        <p className="truncate text-sm text-white/85">{heading}</p>
+        {sub ? <p className="truncate text-xs text-white/45">{sub}</p> : null}
+      </div>
+      {aside ? <div className="shrink-0 text-xs text-white/50">{aside}</div> : null}
+    </div>
+  );
+}
+`;
 
 /** The files the harness owns. Written here, never by a model, so the result
     always installs and always builds. Versions are pinned to what this pipeline
@@ -606,6 +815,16 @@ function scaffold(input: CodeInput): GeneratedFile[] {
     {
       path: "app/layout.tsx",
       content: `import type { Metadata } from "next";\nimport "./globals.css";\n\nexport const metadata: Metadata = {\n  title: ${JSON.stringify(productName)},\n  description: ${JSON.stringify(input.master?.tagline ?? input.sentence)},\n};\n\nexport default function RootLayout({ children }: { children: React.ReactNode }) {\n  return (\n    <html lang="en">\n      <body>{children}</body>\n    </html>\n  );\n}\n`,
+    },
+    {
+      /* The shared kit is harness-owned for the same reason package.json is:
+         two workers writing the screens in parallel cannot negotiate an API,
+         and a guessed prop name (`variant="outline"`, `<EmptyState title=…>`)
+         does not surface until type check — one round later, in a codebase the
+         fixer is also guessing at. Written here, it is the one thing in the
+         project every file can import without asking. */
+      path: "components/ui.tsx",
+      content: UI_KIT,
     },
   ];
 }
