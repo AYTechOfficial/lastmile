@@ -80,12 +80,20 @@ export type ChatInput = {
   timeoutMs?: number;
   /** how many rungs to try before giving up */
   maxRungs?: number;
+  /** how many models of any ONE provider may be tried before the chain moves
+      on — without this, a provider whose whole catalog fails eats the budget
+      and every other provider is never reached */
+  perProviderRungs?: number;
   /** called as each rung is attempted, so the run log can show the walk */
   onAttempt?: (attempt: ChatAttempt) => Promise<void> | void;
 };
 
 const DEFAULT_TIMEOUT = 90_000;
-const DEFAULT_MAX_RUNGS = 6;
+const DEFAULT_MAX_RUNGS = 12;
+/* Two models per provider is enough to tell a broken catalog from a broken
+   request: a provider that answers for one model and 500s for another is worth
+   keeping in the chain, one that 500s twice is not. */
+const DEFAULT_PER_PROVIDER_RUNGS = 2;
 
 /* The dialect an endpoint actually answered on, learned once and reused.
    Keyed by base URL, and only ever a hint — a remembered dialect that starts
@@ -406,6 +414,7 @@ export async function chat(input: ChatInput, messages: ChatMessage[]): Promise<C
   const attempts: ChatAttempt[] = [];
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT;
   const maxRungs = input.maxRungs ?? DEFAULT_MAX_RUNGS;
+  const perProviderRungs = input.perProviderRungs ?? DEFAULT_PER_PROVIDER_RUNGS;
 
   const rungs = await buildRungs(input);
 
@@ -425,6 +434,7 @@ export async function chat(input: ChatInput, messages: ChatMessage[]): Promise<C
   }
 
   const tried: Rung[] = [];
+  const perProvider = new Map<string, number>();
   let lastDetail = "no rung answered";
 
   for (const rung of rungs) {
@@ -434,6 +444,15 @@ export async function chat(input: ChatInput, messages: ChatMessage[]): Promise<C
        same model in two groups when a user pins what the catalog already
        leads with, and paying twice for one model is pure waste. */
     if (tried.some((t) => t.id === rung.id && t.model === rung.model)) continue;
+
+    /* Provider fairness: a provider gets at most `perProviderRungs` attempts,
+       then the chain moves to the next one. Free endpoints fail in ways that
+       have nothing to do with the request — a content filter, a daily quota, a
+       model that was retired this morning — and the run must still be able to
+       reach a provider that can answer. */
+    const used = perProvider.get(rung.id) ?? 0;
+    if (used >= perProviderRungs) continue;
+    perProvider.set(rung.id, used + 1);
     tried.push(rung);
 
     const at = Date.now();

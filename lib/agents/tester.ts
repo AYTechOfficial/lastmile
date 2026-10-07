@@ -178,7 +178,7 @@ export async function runTester(input: TestInput): Promise<TestResult> {
       agent: "test",
       preferred: input.preferredModel ?? defaultModelFor(input.plan.modelTier),
       timeoutMs: 120_000,
-      maxRungs: 4,
+      maxRungs: 6,
       onAttempt: async (attempt) => {
         if (attempt.ok) {
           await input.emit(

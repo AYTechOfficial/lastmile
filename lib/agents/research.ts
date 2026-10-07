@@ -314,7 +314,7 @@ ${BRIEF_SHAPE}`;
     preferred: input.preferredModel ?? defaultModelFor(input.plan.modelTier),
     /* One rung may not eat the stage: the remaining budget is the ceiling. */
     timeoutMs: Math.max(20_000, Math.min(120_000, deadline - Date.now())),
-    maxRungs: 5,
+    maxRungs: 8,
     onAttempt: async (attempt) => {
       attempts.push(attempt);
       await input.emit(

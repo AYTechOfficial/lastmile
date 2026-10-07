@@ -160,7 +160,7 @@ async function askSpec(
     agent: "spec",
     preferred: input.preferredModel ?? defaultModelFor(input.plan.modelTier),
     timeoutMs: 120_000,
-    maxRungs: 5,
+    maxRungs: 8,
     onAttempt: async (attempt) => {
       await input.emit(
         attempt.ok ? "success" : "warn",
@@ -208,7 +208,7 @@ async function askInstructions(
     agent: "prompt",
     preferred: input.preferredModel ?? defaultModelFor(input.plan.modelTier),
     timeoutMs: 120_000,
-    maxRungs: 5,
+    maxRungs: 8,
   };
 
   /* `chat`, not `chatJson`: this is prose by design, so asking for JSON would
