@@ -24,10 +24,16 @@ export function ActivityLog({
   events,
   runNumber,
   live,
+  className,
+  bodyClassName,
 }: {
   events: RunEventDTO[];
   runNumber: number;
   live: boolean;
+  /** extra classes for the outer panel — the full-deck view stretches it */
+  className?: string;
+  /** overrides the fixed 300px body height */
+  bodyClassName?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState(true);
@@ -70,7 +76,12 @@ export function ActivityLog({
   }
 
   return (
-    <div className="overflow-hidden rounded-[14px] border border-edge bg-[linear-gradient(180deg,rgba(14,16,28,0.6),rgba(5,6,10,0.9))] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]">
+    <div
+      className={cn(
+        "overflow-hidden rounded-[14px] border border-edge bg-[linear-gradient(180deg,rgba(14,16,28,0.6),rgba(5,6,10,0.9))] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]",
+        className,
+      )}
+    >
       <div className="flex items-center justify-between gap-3 border-b border-edge bg-white/[0.02] px-3.5 py-2.5">
         <div className="flex items-center gap-2.5">
           <span className="flex gap-1">
@@ -111,7 +122,10 @@ export function ActivityLog({
       <div
         ref={ref}
         onScroll={onScroll}
-        className="thin-scroll h-[300px] overflow-y-auto px-3.5 py-3 font-mono text-[11px] leading-[1.75]"
+        className={cn(
+          "thin-scroll overflow-y-auto px-3.5 py-3 font-mono text-[11px] leading-[1.75]",
+          bodyClassName ?? "h-[300px]",
+        )}
       >
         {events.length === 0 ? (
           <p className="text-t3">starting pipeline…</p>

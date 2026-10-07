@@ -239,6 +239,10 @@ async function callOpenAi(
       /* Low temperature: these agents are extracting structure from evidence,
          not writing prose, and a creative verifier is a useless verifier. */
       temperature: 0.2,
+      /* Room for a full page component: the coder writes complete files inside
+         a JSON envelope, and a tight default cap truncates the last file
+         mid-expression — which then fails the build it was meant to pass. */
+      max_tokens: 16_384,
       ...(json ? { response_format: { type: "json_object" } } : {}),
     }),
     signal,
@@ -288,7 +292,9 @@ async function callAnthropic(
     },
     body: JSON.stringify({
       model: rung.model,
-      max_tokens: 8192,
+      /* Same reasoning as the OpenAI dialect: the coder ships whole files, so
+         the cap must leave room for a complete page component and its JSON. */
+      max_tokens: 16_384,
       temperature: 0.2,
       ...(system ? { system } : {}),
       messages: rest,

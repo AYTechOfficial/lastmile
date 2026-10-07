@@ -5,6 +5,7 @@ import { Meter } from "@/components/kit";
 import { fmtRelative, fmtTokens } from "@/lib/run-dto";
 import { STAGE_META, STAGE_ORDER, isFinished, progressOf, stageIndex, statusMeta } from "./status";
 import { RunStatus } from "./run-status";
+import { RunDeleteButton } from "./run-row-actions";
 
 const pad = (n: number) => "#" + String(n).padStart(4, "0");
 
@@ -30,6 +31,7 @@ export function RunRow({ run }: { run: RunListRow }) {
   const pct = Math.round(progressOf(run.status) * 100);
 
   return (
+    <div className="group/row relative">
     <Link
       href={"/dashboard/runs/" + run.id}
       className="lift group relative grid grid-cols-[auto_1fr_auto] items-center gap-x-4 gap-y-2 rounded-[12px] border border-transparent px-3 py-3 hover:bg-surface md:grid-cols-[54px_minmax(0,1fr)_132px_150px_20px] md:gap-x-5 md:px-4"
@@ -82,5 +84,11 @@ export function RunRow({ run }: { run: RunListRow }) {
 
       <ArrowRight className="hidden h-3.5 w-3.5 text-t3 transition-all group-hover:translate-x-0.5 group-hover:text-brand md:block" />
     </Link>
+    {/* delete lives outside the Link — a button inside a link would navigate */}
+    <RunDeleteButton
+      runId={run.id}
+      className="absolute right-2 top-1/2 z-10 -translate-y-1/2 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/row:opacity-100 md:right-3"
+    />
+  </div>
   );
 }

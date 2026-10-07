@@ -60,7 +60,16 @@ export type VerifyResult = {
 
 const BUILD_CAP_MS = 6 * 60_000;
 const MAX_FILES_IN_PROMPT = 120;
-const KEY_FILE_BYTES = 6_000;
+/* A full page component is comfortably past 6 KB — a tighter cap made the
+   reviewer see a cut-off file and report the truncation itself as a critical
+   defect, which no amount of fixing could ever clear. */
+const KEY_FILE_BYTES = 12_000;
+/** Compile/truncation claims are the BUILD's job to make, not the reviewer's.
+    When the build passed, a review issue that is only one of these claims is a
+    phantom — it reads a prompt excerpt as the whole file — and it would burn
+    the quality loop's budget on something unfixable. */
+const PHANTOM_COMPILE_CLAIM =
+  /does not compile|truncat|incomplete file|incomplete ui|missing return|syntax error|type error|build (error|failure)/i;
 
 /** Which files a fix round should look at first — the ones a build tool or a
     human would open. The model review names files too; this is the fallback. */
@@ -261,7 +270,7 @@ export async function runVerifier(input: VerifyInput): Promise<VerifyResult> {
         {
           role: "system",
           content:
-            "You are a strict code reviewer for a generated web app. You are given the build contract (the master prompt summary), the acceptance spec, and the actual file list with key file excerpts. Find real defects only: missing promised features, broken wiring, obviously dead pages, spec violations. Do NOT invent style complaints. Reply with ONLY JSON: {\"issues\": [{\"title\", \"detail\", \"severity\": \"critical\"|\"major\"|\"minor\", \"files\": [\"path\"]}], \"score\": 0-100}. An empty issues array means clean.",
+            "You are a strict code reviewer for a generated web app. You are given the build contract (the master prompt summary), the acceptance spec, and the actual file list with key file contents. Find real defects only: missing promised features, broken wiring, obviously dead pages, spec violations. Do NOT invent style complaints. File contents may be excerpts — never treat an excerpt ending as a defect, and never report compilation, type-checking or file-completeness concerns: the BUILD RESULT in the message is the single authority on whether the code compiles. Reply with ONLY JSON: {\"issues\": [{\"title\", \"detail\", \"severity\": \"critical\"|\"major\"|\"minor\", \"files\": [\"path\"]}], \"score\": 0-100}. An empty issues array means clean.",
         },
         {
           role: "user",
@@ -275,7 +284,7 @@ export async function runVerifier(input: VerifyInput): Promise<VerifyResult> {
             `FILES (${files.length}):\n${files.slice(0, MAX_FILES_IN_PROMPT).join("\n")}`,
             `KEY FILE CONTENTS:\n${await keyFileContents(dir)}`,
             built
-              ? "The build PASSED."
+              ? "The build PASSED — the code on disk compiles and type-checks in full. Never report compile, type, syntax, or file-truncation concerns; judge features, wiring and spec compliance."
               : "The build FAILED — treat compilation as a given defect and focus on what else is wrong.",
           ].join("\n\n"),
         },
@@ -288,6 +297,12 @@ export async function runVerifier(input: VerifyInput): Promise<VerifyResult> {
       for (const i of (review.value.issues ?? []).slice(0, 10)) {
         const title = (i.title ?? "").trim();
         if (!title) continue;
+        /* A passed build disproves every compile/truncation claim by definition.
+           Letting one through strands the quality loop on an unfixable critical. */
+        if (built && PHANTOM_COMPILE_CLAIM.test(title)) {
+          await input.emit("info", `-> review concern dismissed (build passed): ${title.slice(0, 80)}`);
+          continue;
+        }
         const severity = i.severity === "critical" || i.severity === "minor" ? i.severity : "major";
         issues.push({
           title,

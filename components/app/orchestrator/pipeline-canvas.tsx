@@ -290,7 +290,9 @@ export function PipelineCanvas({
     if (!el) return;
     const ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width ?? W;
-      el.style.setProperty("--oc3-s", String(Math.min(1.15, w / W)));
+      /* no upscale cap — the full-deck view may render wider than design space
+         and transforms keep the scene crisp at any scale */
+      el.style.setProperty("--oc3-s", String(w / W));
     });
     ro.observe(el);
     return () => ro.disconnect();

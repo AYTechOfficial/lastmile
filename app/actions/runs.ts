@@ -1,16 +1,17 @@
 "use server";
 
-import { and, asc, count, eq, gte, notInArray } from "drizzle-orm";
+import { and, asc, count, eq, gte, inArray, notInArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { runs, users } from "@/lib/schema";
+import { jobs, runs, users } from "@/lib/schema";
 import { cancelQueuedForRun, enqueue } from "@/lib/queue";
 import { planOf } from "@/lib/plans";
 import { logEvent } from "@/lib/events";
 import { dispatchRunner } from "@/lib/platform/runner";
 import { rateLimit } from "@/lib/rate-limit";
+import { getBalanceMilli } from "@/lib/credits";
 import { normalizeSentence, slugify, titleFrom, SENTENCE_MAX, SENTENCE_MIN } from "@/lib/slug";
 import { defaultModelFor, selectableModels } from "@/lib/ai/chat";
 import { searchOrder, searchProviderStates } from "@/lib/ai/search";
@@ -61,6 +62,15 @@ export async function createRunAction(
     .limit(1);
 
   const tier = planOf(user?.plan);
+
+  /* Credits first: a run spends real tokens, so an empty balance refuses at
+     the door rather than failing mid-build with work half-paid for. */
+  const balanceMilli = await getBalanceMilli(session.user.id);
+  if (balanceMilli <= 0) {
+    return {
+      error: "Your credit balance is empty — an operator can top it up from the admin panel.",
+    };
+  }
 
   /* The two choices the composer offers. Both are validated against what the
      plan may actually use, so a tampered form cannot pin a run to a model or an
@@ -226,28 +236,74 @@ export async function requestChangesAction(formData: FormData): Promise<void> {
   revalidatePath("/dashboard/runs/" + run.id);
 }
 
-/** Stop a run. Queued work is cancelled immediately; an in-flight stage is
-    allowed to finish its write rather than being torn down mid-transaction. */
+/** Stop a run, from anywhere in its life. Queued work is cancelled
+    immediately; an in-flight stage is allowed to finish its write rather than
+    being torn down mid-transaction, and the runner honours the flag at the
+    next claim. When nothing is in flight any more the run is marked stopped
+    right here — it must never linger as "queued" with no work attached. */
 export async function killRunAction(formData: FormData): Promise<void> {
   const session = await auth();
   if (!session?.user?.id) return;
 
   const runId = String(formData.get("runId") ?? "");
 
-  await db
+  const stopped = await db
     .update(runs)
     .set({ killRequested: true })
     .where(
       and(
         eq(runs.id, runId),
         eq(runs.userId, session.user.id),
-        /* Never let a stop flag terminate an idle or finished run. */
-        notInArray(runs.status, ["done", "failed", "awaiting_approval", "queued"]),
+        /* A stop flag must never touch a finished run or the human checkpoint —
+           awaiting_approval has its own review flow. */
+        notInArray(runs.status, ["done", "failed", "awaiting_approval", "stopped"]),
       ),
-    );
+    )
+    .returning({ id: runs.id });
+
+  if (stopped.length === 0) return;
 
   await cancelQueuedForRun(runId);
+
+  /* Nothing left in flight? The run is over now, not when some runner next
+     claims a job that no longer exists. */
+  const [{ remaining }] = await db
+    .select({ remaining: count() })
+    .from(jobs)
+    .where(and(eq(jobs.runId, runId), inArray(jobs.status, ["queued", "running"])));
+
+  if (Number(remaining) === 0) {
+    await db
+      .update(runs)
+      .set({ status: "stopped", completedAt: new Date() })
+      .where(eq(runs.id, runId));
+    await logEvent(runId, "orchestrator", "warn", "run stopped by you — nothing was in flight");
+  } else {
+    await logEvent(
+      runId,
+      "orchestrator",
+      "warn",
+      "stop requested — the current stage will finish, then the run stops",
+    );
+  }
+
   revalidatePath("/dashboard/runs/" + runId);
+}
+
+/** Delete a project. The run row cascades: jobs, events, agent runs, issues
+    and flows all belong to it. The code and the deploy live on GitHub and
+    Vercel under the user's own accounts and are not touched here. */
+export async function deleteRunAction(formData: FormData): Promise<void> {
+  const session = await auth();
+  if (!session?.user?.id) return;
+
+  const runId = String(formData.get("runId") ?? "");
+  if (!runId) return;
+
+  await db.delete(runs).where(and(eq(runs.id, runId), eq(runs.userId, session.user.id)));
+
+  revalidatePath("/dashboard");
+  redirect("/dashboard");
 }
 
 /** Resume from the last stage that succeeded. Never fakes progress. */

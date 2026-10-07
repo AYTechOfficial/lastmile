@@ -16,6 +16,7 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  Wallet,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -42,6 +43,8 @@ const ADMIN_NAV = { href: "/admin", label: "Admin", icon: ShieldCheck };
 export function Shell({
   name,
   email,
+  image,
+  creditsMilli,
   runs,
   activeCount,
   awaitingCount,
@@ -51,6 +54,9 @@ export function Shell({
 }: {
   name: string;
   email: string;
+  image?: string | null;
+  /** spendable balance in milli-USD — shown in the topbar */
+  creditsMilli: number;
   runs: PaletteRun[];
   activeCount: number;
   awaitingCount: number;
@@ -264,18 +270,33 @@ export function Shell({
 
       <div className="shrink-0 border-t border-edge p-3">
         <div className={cn("flex items-center gap-2.5 px-1.5 py-1.5", railCollapsed && "justify-center px-0")}>
-          <span
-            title={railCollapsed ? name + " · " + email : undefined}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand/50 to-info/30 text-[11px] font-semibold text-white"
+          {/* the whole identity block opens Settings — the account lives there */}
+          <Link
+            href="/dashboard/settings#profile"
+            title={name + " · " + email + " — open settings"}
+            className={cn(
+              "group flex min-w-0 flex-1 items-center gap-2.5 rounded-[10px] p-1 transition-colors hover:bg-surface2/70",
+              railCollapsed && "flex-none",
+            )}
           >
-            {name.slice(0, 1).toUpperCase()}
-          </span>
-          {!railCollapsed && (
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[12.5px] font-medium text-t1">{name}</p>
-              <p className="truncate font-mono text-[9.5px] text-t3">{email}</p>
-            </div>
-          )}
+            <span className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-edge bg-gradient-to-br from-brand/50 to-info/30 text-[11px] font-semibold text-white">
+              {image ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={image} alt="" className="h-full w-full object-cover" />
+              ) : (
+                name.slice(0, 1).toUpperCase()
+              )}
+              <span className="absolute inset-0 hidden items-center justify-center bg-black/55 text-t3 group-hover:flex" aria-hidden>
+                <Settings className="h-3.5 w-3.5" />
+              </span>
+            </span>
+            {!railCollapsed && (
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[12.5px] font-medium text-t1">{name}</span>
+                <span className="block truncate font-mono text-[9.5px] text-t3">{email}</span>
+              </span>
+            )}
+          </Link>
           {!railCollapsed && (
             <button
               type="button"
@@ -349,6 +370,22 @@ export function Shell({
             </div>
 
             <div className="ml-auto flex items-center gap-2">
+              {/* the spendable balance — one glance answers "can I run another build?" */}
+              <Link
+                href="/dashboard/settings#credits"
+                title="Credit balance — runs are charged per token"
+                className={cn(
+                  "flex h-8 shrink-0 items-center gap-1.5 rounded-[9px] border px-2.5 text-[11.5px] transition-colors",
+                  creditsMilli <= 0
+                    ? "border-bad/40 bg-bad/10 text-bad"
+                    : creditsMilli < 2000
+                      ? "border-warn/40 bg-warn/10 text-warn"
+                      : "border-edge bg-surface text-t2 hover:border-edge2",
+                )}
+              >
+                <Wallet className="h-3.5 w-3.5" />
+                <span className="tnum font-mono">${(creditsMilli / 1000).toFixed(2)}</span>
+              </Link>
               <EngineChips llm={liveLlm} search={liveSearch} />
               <button
                 type="button"

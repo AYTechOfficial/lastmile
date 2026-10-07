@@ -441,6 +441,7 @@ STRICT RULES
 - Styling: Tailwind utility classes only. No CSS modules, no styled-components.
 - Persistence: localStorage only. There is no backend and no database.
 - Write REAL content for this specific product. No lorem ipsum, no placeholders, no TODOs.
+- EVERY file must be COMPLETE from its first line to its last. A file that ends mid-function, mid-object or mid-JSX is a failed build. If you are running short on space, simplify styling and commentary — never stop before the file is finished and syntactically whole.
 - Do not create: package.json, tsconfig.json, next.config.mjs, postcss.config.mjs, app/layout.tsx, app/globals.css. Those already exist and are correct — any file you return with those paths is discarded.
 - Files you SHOULD write: app/page.tsx plus any routes in the spec, and components/ files for the parts that are reused.
 - Escape all newlines inside "content" correctly so the JSON parses.
@@ -472,6 +473,7 @@ function fixPrompt(input: CodeInput): string {
 { "files": [ { "path": "...", "content": "<the complete corrected file>" } ] }
 
 Return the COMPLETE corrected contents of only the files that need changing — not a diff, not a fragment.
+A file that ends mid-function, mid-object or mid-JSX is a failed build — if space is tight, simplify styling, never cut logic.
 Do not create package.json, tsconfig.json, next.config.mjs, app/layout.tsx or app/globals.css.
 Keep everything that already works; change only what the defects require.
 

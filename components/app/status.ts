@@ -71,6 +71,7 @@ export const STATUS_META: Record<string, { label: string; tone: Tone; live: bool
   fixing: { label: "Fixing defects", tone: "warn", live: true },
   done: { label: "Shipped", tone: "pass", live: false },
   failed: { label: "Failed", tone: "bad", live: false },
+  stopped: { label: "Stopped", tone: "neutral", live: false },
   // legacy stub-engine statuses
   building: { label: "Building", tone: "brand", live: true },
   verifying: { label: "Verifying", tone: "info", live: true },
@@ -108,6 +109,8 @@ export function stageIndex(status: string, currentStage?: string): number {
     case "testing":
     case "done":
       return 7;
+    case "stopped":
+      return 7;
     default:
       return 0;
   }
@@ -138,6 +141,7 @@ export function progressOf(status: string): number {
       return 0.9;
     case "done":
     case "failed":
+    case "stopped":
       return 1;
     default:
       return 0;

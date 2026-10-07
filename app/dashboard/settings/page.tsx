@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
-import { ArrowUpRight, Check, Cpu, Globe, Plug } from "lucide-react";
+import { ArrowUpRight, Check, Cpu, Globe, Plug, Wallet } from "lucide-react";
 import { signIn } from "@/lib/auth";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { accounts } from "@/lib/schema";
+import { accounts, creditEvents, users } from "@/lib/schema";
+import { fmtMilli, pricePerMillionMilli } from "@/lib/credits";
 import { providerStates } from "@/lib/ai/providers";
 import { searchProviderStates } from "@/lib/ai/search";
 import { getPlatformData } from "@/lib/platform/settings";
@@ -13,6 +14,7 @@ import { listUserProviders } from "@/lib/platform/user-providers";
 import { vercelConnectionStatus } from "@/lib/platform/vercel";
 import { UserProviders } from "@/components/app/user-providers";
 import { VercelConnect } from "@/components/app/vercel-connect";
+import { EmailForm, PasswordForm, ProfileForm } from "@/components/app/profile-forms";
 import { SignoutButton } from "./signout-button";
 import { GithubIcon } from "@/components/github-icon";
 import { Badge, Panel, btn } from "@/components/kit";
@@ -43,6 +45,34 @@ export default async function SettingsPage() {
   // deploy capacity, honestly surfaced: the user's connected Vercel first,
   // then the operator's token (env or Admin → Infrastructure)
   const vercel = await vercelConnectionStatus(session.user.id);
+  const pricePerMillion = await pricePerMillionMilli();
+  const ledger = await db
+    .select({
+      id: creditEvents.id,
+      delta: creditEvents.deltaMilli,
+      balance: creditEvents.balanceMilli,
+      reason: creditEvents.reason,
+      createdAt: creditEvents.createdAt,
+    })
+    .from(creditEvents)
+    .where(eq(creditEvents.userId, session.user.id))
+    .orderBy(desc(creditEvents.createdAt))
+    .limit(10);
+  const balanceRow = await db
+    .select({ credits: users.creditsMilli })
+    .from(users)
+    .where(eq(users.id, session.user.id))
+    .limit(1);
+  const balanceMilli = balanceRow[0]?.credits ?? 0;
+  const hasPassword = Boolean(
+    (
+      await db
+        .select({ p: users.passwordHash })
+        .from(users)
+        .where(eq(users.id, session.user.id))
+        .limit(1)
+    )[0]?.p,
+  );
 
   return (
     <div className="mx-auto max-w-[820px] space-y-6">
@@ -148,15 +178,70 @@ export default async function SettingsPage() {
         </p>
       </section>
 
+      {/* ————— credits ————— */}
+      <section id="credits" className="scroll-mt-24 space-y-3">
+        <h2 className="display flex items-center gap-2 text-[15px] font-semibold text-t1">
+          <Wallet className="h-4 w-4 text-brand" />
+          Credits
+        </h2>
+        <Panel className="p-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="eyebrow mb-1.5">Balance</p>
+              <p className="display tnum text-[30px] font-semibold leading-none tracking-[-0.02em] text-t1">
+                {fmtMilli(balanceMilli)}
+              </p>
+            </div>
+            <p className="max-w-sm text-[12.5px] leading-relaxed text-t3">
+              Every run is charged per token at{" "}
+              <span className="tnum font-mono text-t2">{fmtMilli(pricePerMillion)}</span> per million —
+              metered by the runner after each stage, never estimated.
+            </p>
+          </div>
+          {ledger.length > 0 ? (
+            <div className="mt-4 divide-y divide-edge border-t border-edge pt-1">
+              {ledger.map((e) => (
+                <div key={e.id} className="flex items-center justify-between gap-3 py-2">
+                  <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-t3">{e.reason}</span>
+                  <span className="flex items-center gap-3">
+                    <span className={"tnum font-mono text-[11.5px] " + (e.delta < 0 ? "text-bad" : "text-pass")}>
+                      {e.delta < 0 ? "−" : "+"}${(Math.abs(e.delta) / 1000).toFixed(3)}
+                    </span>
+                    <span className="tnum font-mono text-[11.5px] text-t2">{fmtMilli(e.balance)}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 border-t border-edge pt-3 text-[12px] text-t3">
+              No credit movements yet — your first run will appear here.
+            </p>
+          )}
+        </Panel>
+      </section>
+
       {/* ————— profile ————— */}
-      <section className="space-y-3">
+      <section id="profile" className="scroll-mt-24 space-y-3">
         <h2 className="display text-[15px] font-semibold text-t1">Profile</h2>
         <Panel className="overflow-hidden">
-          <div className="divide-y divide-edge px-4">
-            <Row label="Name" value={session.user.name ?? "—"} />
-            <Row label="Email" value={session.user.email ?? "—"} mono />
-          </div>
+          <ProfileForm name={session.user.name ?? ""} image={session.user.image ?? null} email={session.user.email ?? ""} />
         </Panel>
+      </section>
+
+      {/* ————— account security ————— */}
+      <section className="grid gap-3 lg:grid-cols-2">
+        <div className="space-y-3">
+          <h2 className="display text-[15px] font-semibold text-t1">Email</h2>
+          <Panel className="overflow-hidden">
+            <EmailForm email={session.user.email ?? ""} />
+          </Panel>
+        </div>
+        <div className="space-y-3">
+          <h2 className="display text-[15px] font-semibold text-t1">Password</h2>
+          <Panel className="overflow-hidden">
+            <PasswordForm hasPassword={hasPassword} />
+          </Panel>
+        </div>
       </section>
 
       {/* ————— connections ————— */}
@@ -305,13 +390,5 @@ function ProviderRow({
   );
 }
 
-function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex items-center justify-between gap-4 py-3">
-      <span className="text-[12.5px] text-t3">{label}</span>
-      <span className={mono ? "font-mono text-[12px] text-t2" : "text-[13px] text-t1"}>{value}</span>
-    </div>
-  );
-}
 
 

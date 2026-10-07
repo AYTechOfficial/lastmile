@@ -23,14 +23,14 @@ export function RunList({ runs }: { runs: RunListRow[] }) {
   const counts = useMemo(
     () => ({
       all: runs.length,
-      active: runs.filter((r) => !["done", "failed"].includes(r.status)).length,
+      active: runs.filter((r) => !["done", "failed", "stopped"].includes(r.status)).length,
       verified: runs.filter((r) => r.status === "done").length,
     }),
     [runs],
   );
 
   const filtered = useMemo(() => {
-    if (filter === "active") return runs.filter((r) => !["done", "failed"].includes(r.status));
+    if (filter === "active") return runs.filter((r) => !["done", "failed", "stopped"].includes(r.status));
     if (filter === "verified") return runs.filter((r) => r.status === "done");
     return runs;
   }, [runs, filter]);

@@ -12,7 +12,7 @@
    and another runner picks the job up. That is the whole reason the previous
    in-process design could not survive. */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { config } from "dotenv";
 /* Type-only imports are erased at build time, so they can sit above the runtime
    imports that must happen after the environment is loaded. */
@@ -190,6 +190,28 @@ async function main(): Promise<void> {
       .update(runs)
       .set({ tokens: run.tokens + outcome.tokens })
       .where(eq(runs.id, run.id));
+
+    /* Metering happens where the tokens are counted: the stage's usage is
+       charged to the owner's credit balance at the operator's price, and the
+       movement lands in the ledger. A metering failure never fails the stage. */
+    try {
+      const { chargeRunTokens } = await import("../lib/credits");
+      const { chargedMilli, balanceMilli } = await chargeRunTokens(
+        run.userId,
+        run.id,
+        outcome.tokens,
+        `spend:${kind}`,
+      );
+      if (chargedMilli > 0) {
+        console.log(`charged $${(chargedMilli / 1000).toFixed(3)} — balance $${(balanceMilli / 1000).toFixed(2)}`);
+        await db
+          .update(runs)
+          .set({ costCents: sql`${runs.costCents} + ${Math.ceil(chargedMilli / 10)}` })
+          .where(eq(runs.id, run.id));
+      }
+    } catch (meterError) {
+      console.error("metering failed (stage continues):", meterError);
+    }
   }
 
   await complete(job.id, workerId, { ok: outcome.ok, issues: outcome.issues });

@@ -3,11 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ChevronRight, FileText, Check } from "lucide-react";
-import { Panel } from "@/components/kit";
+import { ArrowLeft, ChevronRight, FileText, Check, Square } from "lucide-react";
+import { Panel, btn } from "@/components/kit";
 import type { RunStateDTO } from "@/lib/run-dto";
+import { killRunAction } from "@/app/actions/runs";
 import { Orchestrator } from "@/components/app/orchestrator/orchestrator";
 import { RunStatus } from "./run-status";
+import { RunDeleteButton } from "./run-row-actions";
 import { SpecReview } from "./spec-review";
 import { StageRail } from "./stage-rail";
 import { Telemetry } from "./telemetry";
@@ -17,12 +19,15 @@ const pad = (n: number) => "#" + String(n).padStart(4, "0");
 
 /* The build view. Two modes, honestly distinct:
      awaiting_approval — the spec is the decision in front of you
-     everything else   — the Orchestrator Panel is the whole show            */
+     everything else   — the Orchestrator Panel is the whole show
+
+   The state here is LIVE, not the frozen server snapshot: the Orchestrator
+   reports every stream frame upward, so the checkpoint appears the moment the
+   run parks at awaiting_approval — no manual refresh. */
 export function RunView({ initial }: { initial: RunStateDTO }) {
   const router = useRouter();
-  // the Orchestrator owns live updates over SSE; this shell re-renders from
-  // the server snapshot, so `initial` IS the state here.
-  const state = initial;
+  const [live, setLive] = useState<RunStateDTO>(initial);
+  const state = live;
   const [now, setNow] = useState(0);
   const lastStatus = useRef(initial.run.status);
 
@@ -40,6 +45,7 @@ export function RunView({ initial }: { initial: RunStateDTO }) {
 
   const run = state.run;
   const awaiting = run.status === "awaiting_approval";
+  const stoppable = !["done", "failed", "stopped", "awaiting_approval"].includes(run.status);
 
   return (
     <div className="space-y-5">
@@ -64,6 +70,22 @@ export function RunView({ initial }: { initial: RunStateDTO }) {
             {run.title}
           </h1>
         </div>
+
+        {stoppable ? (
+          <form action={killRunAction} className="flex shrink-0 items-center gap-2">
+            <input type="hidden" name="runId" value={run.id} />
+            <button
+              type="submit"
+              title="Stop the pipeline — the current stage finishes its write, then the run stops"
+              className={btn("danger", "md")}
+            >
+              <Square className="h-3 w-3 fill-current" />
+              Stop pipeline
+            </button>
+          </form>
+        ) : (
+          <RunDeleteButton runId={run.id} className="static translate-y-0" />
+        )}
       </div>
 
       <StageRail status={run.status} currentStage={run.currentStage} events={state.events} />
@@ -76,7 +98,7 @@ export function RunView({ initial }: { initial: RunStateDTO }) {
 
       {!awaiting ? (
         <>
-          <Orchestrator initial={state} onRefreshChrome={() => router.refresh()} />
+          <Orchestrator initial={state} onState={setLive} onRefreshChrome={() => router.refresh()} />
           <aside className="lg:hidden">
             <Telemetry run={run} agents={state.agents} now={now} />
           </aside>

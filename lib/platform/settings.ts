@@ -68,7 +68,17 @@ export type PlatformData = {
   infra: InfraEntry;
   /** which tier each plan routes to — the operator's switch */
   policy: Record<PlanId, ModelTier>;
+  /** credit economy — both values in milli-USD, editable in the admin panel */
+  credits: {
+    /** what 1,000,000 tokens cost a user, e.g. 1000 = $1.00 */
+    pricePerMillionMilli: number;
+    /** the grant a new account starts with, e.g. 10000 = $10.00 */
+    freeGrantMilli: number;
+  };
 };
+
+export const DEFAULT_FREE_GRANT_MILLI = 10_000; // $10.00
+export const DEFAULT_PRICE_PER_MILLION_MILLI = 1_000; // $1.00 / 1M tokens
 
 /* The env-configured providers, used until an operator edits the catalog. All of
    these speak the OpenAI chat-completions dialect, so one client covers them.
@@ -216,6 +226,10 @@ function defaults(): PlatformData {
       vercelTeamId: process.env.VERCEL_TEAM_ID ?? null,
     },
     policy: { free: "free", pro: "premium" },
+    credits: {
+      pricePerMillionMilli: DEFAULT_PRICE_PER_MILLION_MILLI,
+      freeGrantMilli: DEFAULT_FREE_GRANT_MILLI,
+    },
   };
 }
 
@@ -268,6 +282,19 @@ function mergeWithDefaults(stored: Partial<PlatformData>): PlatformData {
         : base.providers,
     infra: { ...base.infra, ...(stored.infra ?? {}) },
     policy: { ...base.policy, ...(stored.policy ?? {}) },
+    credits: {
+      ...base.credits,
+      ...(stored.credits ?? {}),
+      /* a config row written before pricing existed must not read as $0 */
+      pricePerMillionMilli:
+        typeof stored.credits?.pricePerMillionMilli === "number"
+          ? stored.credits.pricePerMillionMilli
+          : base.credits.pricePerMillionMilli,
+      freeGrantMilli:
+        typeof stored.credits?.freeGrantMilli === "number"
+          ? stored.credits.freeGrantMilli
+          : base.credits.freeGrantMilli,
+    },
   };
 }
 

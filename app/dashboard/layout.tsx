@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { desc, eq } from "drizzle-orm";
 import { auth, isAdminEmail } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { runs } from "@/lib/schema";
+import { runs, users } from "@/lib/schema";
 import { providerStates } from "@/lib/ai/providers";
 import { searchProviderStates } from "@/lib/ai/search";
 import { Shell, type ProviderLine } from "@/components/app/shell";
@@ -20,6 +20,14 @@ export default async function DashboardLayout({
 
   const name = session.user.name ?? session.user.email?.split("@")[0] ?? "builder";
   const email = session.user.email ?? "";
+  const image = session.user.image ?? null;
+
+  const [account] = await db
+    .select({ credits: users.creditsMilli })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  const creditsMilli = account?.credits ?? 0;
 
   const recent = await db
     .select({
@@ -59,6 +67,8 @@ export default async function DashboardLayout({
     <Shell
       name={name}
       email={email}
+      image={image}
+      creditsMilli={creditsMilli}
       runs={recent}
       activeCount={activeCount}
       awaitingCount={awaitingCount}

@@ -44,6 +44,11 @@ export const users = app.table("user", {
   passwordHash: text("password_hash"),
   plan: text("plan").notNull().default("free"), // free | pro — gates the model policy
 
+  /** Spendable credit balance, in thousandths of a dollar (milli-USD).
+      Integer math: no float drift, and $10 reads as 10_000. New accounts
+      start with the free grant; the runner charges per token. */
+  creditsMilli: integer("credits_milli").notNull().default(10_000),
+
   /** Which GitHub hosts a user's generated code.
    *  auto = their linked account if present, else the platform account. */
   githubHost: text("github_host").notNull().default("auto"), // auto | account | platform
@@ -367,6 +372,32 @@ export const runFlows = app.table(
 );
 
 /* ————————————————————————— usage metering ————————————————————————— */
+
+/** The credit ledger. One row per balance movement — a grant or a charge —
+    with the balance captured at write time, so the audit trail reads like a
+    bank statement without replaying the whole history.
+
+    `runId` is nullable and SET NULL on run deletion: money history outlives
+    the project it bought, deliberately — deleting a run must not launder the
+    ledger. */
+export const creditEvents = app.table(
+  "credit_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").references(() => runs.id, { onDelete: "set null" }),
+    /** negative = spent, positive = granted */
+    deltaMilli: integer("delta_milli").notNull(),
+    /** the balance right after this movement */
+    balanceMilli: integer("balance_milli").notNull(),
+    /** grant:signup | grant:admin | spend:<stage> */
+    reason: text("reason").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("credit_events_user_idx").on(t.userId, t.createdAt)],
+);
 
 /** Per-day per-user counters, so quotas never require a scan of `runs`. */
 export const usageDaily = app.table(

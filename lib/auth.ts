@@ -19,7 +19,7 @@ import { planOf, type PlanId } from "./plans";
    session at the point of use keeps that decision server-side, where a client
    cannot escalate it. */
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
   adapter: DrizzleAdapter(db, {
     usersTable: users,
     accountsTable: accounts,
@@ -70,8 +70,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   callbacks: {
-    jwt({ token, user }) {
+    jwt({ token, user, trigger, session }) {
       if (user?.id) token.uid = user.id;
+      /* Profile edits (name / email / avatar) update the signed-in session in
+         place, so the shell reflects them without a re-login. The update
+         payload is the Session shape: { user: { name?, email?, image? } }. */
+      if (trigger === "update" && session) {
+        const s = session as {
+          name?: string | null;
+          email?: string | null;
+          image?: string | null;
+          user?: { name?: string | null; email?: string | null; image?: string | null };
+        };
+        const u = s.user ?? s;
+        if (u.name !== undefined) token.name = u.name;
+        if (u.email !== undefined) token.email = u.email;
+        if (u.image !== undefined) token.picture = u.image;
+      }
       return token;
     },
     session({ session, token }) {
