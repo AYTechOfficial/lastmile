@@ -186,6 +186,42 @@ export async function runDeployer(input: DeployInput): Promise<DeployResult> {
       };
     }
 
+    /* ————— make it public —————
+       New projects ship with Vercel Authentication (SSO) on, which redirects
+       every visitor to a login — the product would exist but nobody could open
+       it. Generated products must be open, so protection is turned off on the
+       project and the URL is then PROVEN public before the stage claims
+       success: a redirect to Vercel's login is a failure, not a link. */
+    const projRes = await fetch(`${API}/v9/projects/${encodeURIComponent(body.name)}${teamQs}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ ssoProtection: null }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!projRes.ok) {
+      await input.emit("warn", `-> could not disable Vercel Authentication (HTTP ${projRes.status}) — the link may require a Vercel login`);
+    }
+
+    let publicOk = false;
+    const publicDeadline = Date.now() + 60_000;
+    while (Date.now() < publicDeadline) {
+      const check = await fetch(readyUrl, { redirect: "manual", signal: AbortSignal.timeout(15_000) }).catch(() => null);
+      if (check && check.status >= 200 && check.status < 300) {
+        publicOk = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 5_000));
+      await input.heartbeat();
+    }
+    if (!publicOk) {
+      return {
+        ok: false,
+        url: null,
+        tokens: 0,
+        reason: `the deployment is up but not public — Vercel Authentication still redirects visitors (disable it on project ${body.name})`,
+      };
+    }
+
     await input.emit("success", `-> deployed to ${readyUrl} in ${Math.round((Date.now() - started) / 1000)}s`);
     await input.emit("url", readyUrl);
     return { ok: true, url: readyUrl, tokens: 0 };

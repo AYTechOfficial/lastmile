@@ -106,16 +106,21 @@ export async function runTester(input: TestInput): Promise<TestResult> {
     let html = "";
     let note: string | undefined;
     try {
+      /* Redirects are followed nowhere: a 3xx here is almost always Vercel's
+         SSO wall, which returned 200 only after walking into the login page —
+         a pass that lied. The URL must answer 200 directly to count. */
       const res = await fetch(base + route, {
         headers: { "User-Agent": "LastMileQA/1.0 (+live-check)" },
-        redirect: "follow",
+        redirect: "manual",
         signal: AbortSignal.timeout(PAGE_TIMEOUT_MS),
       });
       status = res.status;
-      html = await res.text();
+      html = res.ok ? await res.text() : "";
       assertions += 1;
       if (res.ok && looksLikeAPage(html)) {
         passed += 1;
+      } else if (status >= 300 && status < 400) {
+        note = "redirected — the URL is not directly public";
       } else {
         note = res.ok ? "response does not look like a rendered page" : `HTTP ${status}`;
       }
