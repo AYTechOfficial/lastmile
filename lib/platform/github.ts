@@ -291,7 +291,11 @@ export async function commitFiles(input: CommitInput): Promise<CommitResult> {
 
     let refRes: Response;
     if (parentSha) {
-      refRes = await fetch(`${refUrl}/${branch}`, {
+      /* The qualified form is required here: PATCH /git/refs/{ref} does not
+         resolve a bare branch name — "main" answers 422 "Reference does not
+         exist" even while the ref plainly exists (verified live). "heads/main"
+         is the form the endpoint documents and accepts. */
+      refRes = await fetch(`${refUrl}/heads/${branch}`, {
         method: "PATCH",
         headers: headers(a.token),
         body: JSON.stringify({ sha: commit.sha, force: false }),
