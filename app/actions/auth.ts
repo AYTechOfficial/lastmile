@@ -6,6 +6,8 @@ import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { users } from "@/lib/schema";
 import { rateLimit } from "@/lib/rate-limit";
+import { grantCredits } from "@/lib/credits";
+import { getPlatformData } from "@/lib/platform/settings";
 
 export type AuthFormState = { error?: string; ok?: boolean };
 
@@ -54,13 +56,26 @@ export async function signUpAction(
 
   const passwordHash = await bcrypt.hash(password, 10);
 
-  await db.insert(users).values({
-    name: name || email.split("@")[0],
-    email,
-    passwordHash,
-    /* New accounts start on the free plan; Pro is assigned by an operator. */
-    plan: "free",
-  });
+  /* The signup grant is the operator's number (admin → credits), not a
+     constant: it is credited through the ledger so the new account opens with
+     a balance it can explain — every dollar traceable to a grant row. */
+  const { credits: pricing } = await getPlatformData();
+
+  const [created] = await db
+    .insert(users)
+    .values({
+      name: name || email.split("@")[0],
+      email,
+      passwordHash,
+      /* New accounts start on the free plan; Pro is assigned by an operator. */
+      plan: "free",
+      creditsMilli: 0,
+    })
+    .returning({ id: users.id });
+
+  if (created) {
+    await grantCredits(created.id, pricing.freeGrantMilli, "grant:signup");
+  }
 
   redirect("/login?created=1");
 }

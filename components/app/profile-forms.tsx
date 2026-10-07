@@ -72,7 +72,9 @@ export function ProfileForm({
   const initial = (name || email).slice(0, 1).toUpperCase();
 
   return (
-    <form action={action} className="space-y-4 p-4">
+    /* keyed on the saved identity so a successful save remounts the fields
+       with the values the server just stored, not the ones they had on load */
+    <form key={`${name}|${image ?? ""}`} action={action} className="space-y-4 p-4">
       <div className="flex flex-wrap items-center gap-4">
         <span className="relative block h-16 w-16 shrink-0 overflow-hidden rounded-full border border-edge bg-surface2">
           {avatarSrc ? (

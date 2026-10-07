@@ -205,7 +205,10 @@ export default async function SettingsPage() {
                   <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-t3">{e.reason}</span>
                   <span className="flex items-center gap-3">
                     <span className={"tnum font-mono text-[11.5px] " + (e.delta < 0 ? "text-bad" : "text-pass")}>
-                      {e.delta < 0 ? "−" : "+"}${(Math.abs(e.delta) / 1000).toFixed(3)}
+                      {e.delta < 0 ? "−" : "+"}
+                      {Math.abs(e.delta) >= 1000
+                        ? "$" + (Math.abs(e.delta) / 1000).toFixed(2)
+                        : "$" + (Math.abs(e.delta) / 1000).toFixed(4)}
                     </span>
                     <span className="tnum font-mono text-[11.5px] text-t2">{fmtMilli(e.balance)}</span>
                   </span>
