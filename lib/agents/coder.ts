@@ -48,6 +48,9 @@ export type CodeInput = {
   firstPass: boolean;
   /** files a fix round should touch, from the defect ledger */
   files?: string[];
+  /** the deployed platform's own build error, when the deploy stage bounced
+      the run back — the most precise failure report the pipeline has */
+  deployError?: string | null;
   iteration: number;
   emit: (kind: "info" | "command" | "success" | "warn" | "error" | "url", line: string) => Promise<void>;
   heartbeat: () => Promise<void>;
@@ -305,6 +308,9 @@ Keep everything that already works; change only what the defects require.
 
 FILES THE DEFECTS POINT AT
 ${(input.files ?? []).join("\n") || "(the defects did not name files — find them yourself)"}
+${input.deployError ? `
+DEPLOY FAILURE (the hosting platform rejected the build — fix what it names)
+${input.deployError.slice(0, 2000)}` : ""}
 
 MASTER BUILD PROMPT (the contract the code is held to)
 ${input.master?.instructions ?? input.sentence}`;

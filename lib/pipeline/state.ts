@@ -129,9 +129,12 @@ export function advance(
       const roundsUsed = iteration;
       if (outcome.blocking > 0) {
         if (roundsUsed >= plan.maxIterations) {
+          /* Nothing ships broken. The budget is spent with critical defects
+             still open, so the run ends as a failure the user can retry —
+             deploying anyway would trade honesty for a URL. */
           return {
-            type: "finish",
-            reason: `Quality loop hit its ${plan.maxIterations}-round budget with ${outcome.blocking} blocking issue(s) open`,
+            type: "fail",
+            reason: `Quality loop hit its ${plan.maxIterations}-round budget with ${outcome.blocking} critical issue(s) open`,
           };
         }
         return {
@@ -145,14 +148,34 @@ export function advance(
     }
 
     case "deploy":
+      /* A deploy that breaks goes back to the coder with Vercel's own error —
+         the verifier passed the build locally, so a platform build failure is
+         a defect like any other, and the fix round should name it. */
+      if (!outcome.ok) {
+        if (iteration >= plan.maxIterations) {
+          return {
+            type: "fail",
+            reason: outcome.reason ?? "the deployment failed and the fix budget is spent",
+          };
+        }
+        return {
+          type: "enqueue",
+          kind: "code",
+          iteration: iteration + 1,
+          payload: { fixOnly: true, from: "deploy", deployError: outcome.reason ?? "the Vercel build failed" },
+        };
+      }
       return { type: "enqueue", kind: "test", iteration };
 
     case "test": {
       if (outcome.blocking > 0) {
         if (iteration >= plan.maxIterations) {
+          /* The URL exists at this point, so "done" here is honest: the user
+             can open the product AND see exactly what live QA still objects
+             to in the ledger. */
           return {
             type: "finish",
-            reason: `Live QA found ${outcome.blocking} blocking issue(s) and the ${plan.maxIterations}-round budget is spent`,
+            reason: `shipped with ${outcome.blocking} open issue(s) — the ${plan.maxIterations}-round budget is spent, the ledger has the details`,
           };
         }
         return {

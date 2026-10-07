@@ -183,6 +183,9 @@ const code: StageExecutor = async (ctx) => {
   const started = Date.now();
   const firstPass = ctx.payload.firstPass === true || !ctx.run.repoName;
   const files = Array.isArray(ctx.payload.files) ? (ctx.payload.files as string[]) : [];
+  /* A deploy failure hands the coder Vercel's own error, so the fix round
+     patches the exact files the platform build rejected. */
+  const deployError = typeof ctx.payload.deployError === "string" ? (ctx.payload.deployError as string) : null;
 
   const result = await runCoder({
     sentence: ctx.run.sentence,
@@ -195,6 +198,7 @@ const code: StageExecutor = async (ctx) => {
     repo: ctx.repo,
     firstPass,
     files,
+    deployError,
     iteration: ctx.iteration,
     emit: ctx.emit,
     heartbeat: ctx.heartbeat,
