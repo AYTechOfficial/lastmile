@@ -4,6 +4,7 @@ import type { StageOutcome } from "../lib/pipeline/state";
 import type { runEvents, runs } from "../lib/schema";
 import { runResearch } from "../lib/agents/research";
 import { runPrompt } from "../lib/agents/prompt";
+import { runCoder } from "../lib/agents/coder";
 
 /* The stage registry.
 
@@ -163,10 +164,88 @@ async function saveSpec(runId: string, spec: unknown, master: unknown): Promise<
   await db.update(runs).set({ spec, masterPrompt: master }).where(eq(runs.id, runId));
 }
 
+/* ————————————————————————— code ————————————————————————— */
+
+/** The Coding Agent.
+
+    Two shapes, decided by the payload rather than by the stage: a first pass
+    builds the whole product from the master prompt, and a fix round re-patches
+    only the files the defect ledger named. Both commit to the same repo, and
+    both record the commit sha on the run so the next stage — and a runner that
+    replaces this one — resumes from exactly there. */
+const code: StageExecutor = async (ctx) => {
+  const started = Date.now();
+  const firstPass = ctx.payload.firstPass === true || !ctx.run.repoName;
+  const files = Array.isArray(ctx.payload.files) ? (ctx.payload.files as string[]) : [];
+
+  const result = await runCoder({
+    sentence: ctx.run.sentence,
+    slug: ctx.run.slug,
+    plan: ctx.plan,
+    userId: ctx.userId,
+    preferredModel: ctx.run.modelChoice,
+    master: (ctx.run.masterPrompt ?? null) as Parameters<typeof runCoder>[0]["master"],
+    spec: (ctx.run.spec ?? null) as Parameters<typeof runCoder>[0]["spec"],
+    repo: ctx.repo,
+    firstPass,
+    files,
+    iteration: ctx.iteration,
+    emit: ctx.emit,
+    heartbeat: ctx.heartbeat,
+  });
+
+  if (result.repo) {
+    await saveCode(ctx.run.id, result);
+  }
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      issues: 0,
+      blocking: 0,
+      reason: result.reason ?? "the coding agent produced no code",
+      tokens: result.tokens,
+    };
+  }
+
+  await ctx.emit(
+    "info",
+    `code finished in ${Math.round((Date.now() - started) / 1000)}s · ${result.files.length} file(s) · ${result.generated ? "model-written" : "scaffold only"}`,
+  );
+
+  return {
+    ok: true,
+    issues: 0,
+    blocking: 0,
+    tokens: result.tokens,
+    commitSha: result.commitSha,
+  };
+};
+
+/** Persist where the code landed. Written before the outcome is reported so a
+    crash between the commit and the bookkeeping still leaves the run pointing
+    at a real commit. */
+async function saveCode(runId: string, result: { repo: { owner: string; name: string; url: string } | null; commitSha: string | null }): Promise<void> {
+  if (!result.repo) return;
+  const { db } = await import("../lib/db");
+  const { runs } = await import("../lib/schema");
+  const { eq } = await import("drizzle-orm");
+  await db
+    .update(runs)
+    .set({
+      repoOwner: result.repo.owner,
+      repoName: result.repo.name,
+      repoUrl: result.repo.url,
+      commitSha: result.commitSha,
+    })
+    .where(eq(runs.id, runId));
+}
+
 /** Stages that can actually run. Filled in as each agent lands. */
 export const STAGE_EXECUTORS: Partial<Record<JobKind, StageExecutor>> = {
   research,
   prompt,
+  code,
 };
 
 export function hasExecutor(kind: JobKind): boolean {

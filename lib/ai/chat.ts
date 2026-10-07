@@ -143,19 +143,22 @@ async function buildRungs(input: ChatInput): Promise<Rung[]> {
     });
   };
 
-  /* Rung group 1 — the user's own endpoints. */
+  /* Rung group 1 — the user's own endpoints. The 10,000 base is deliberate: a
+     user's own key always outranks the platform's, because they are paying for
+     it, and no platform priority value can be set high enough to jump it. */
   if (input.userId) {
     const own = await activeUserProviders(input.userId);
     for (const p of own) {
-      push(p, orderModels(p.models, preferred), 1000);
+      push(p, orderModels(p.models, preferred), 10_000);
     }
   }
 
-  /* Rung group 2 — the platform catalog for this plan tier. */
+  /* Rung group 2 — the platform catalog for this plan tier, ordered by the
+     operator's own priority rather than by array position. */
   const platform = await resolveProviders(input.tier);
   for (const p of platform) {
     const pinned = input.agent ? p.agents[input.agent] : undefined;
-    push(p, orderModels(p.models, preferred, pinned), 100);
+    push(p, orderModels(p.models, preferred, pinned), p.priority);
   }
 
   rungs.sort((a, b) => b.rank - a.rank);

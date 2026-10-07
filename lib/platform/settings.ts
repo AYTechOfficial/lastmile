@@ -40,6 +40,18 @@ export type ProviderEntry = {
   /** which plan tier may use it */
   tier: ModelTier;
   enabled: boolean;
+  /**
+   * Which provider a run reaches for first. HIGHER WINS, and this is the field
+   * that decides the failover order — not the array order, which is only the
+   * tie-break.
+   *
+   * It exists because catalog order was being used as priority, and that made
+   * an incidental fact (which provider happened to be typed first) decide which
+   * model built people's products. Priority makes the intent explicit and
+   * reviewable: a benchmarked provider leads, and a weaker one is kept strictly
+   * as a last-resort rung.
+   */
+  priority: number;
   /** per-agent model pins — the code agent can run a different model to research */
   agents: Partial<Record<AgentId, string>>;
   notes: string | null;
@@ -61,10 +73,25 @@ export type PlatformData = {
 /* The env-configured providers, used until an operator edits the catalog. All of
    these speak the OpenAI chat-completions dialect, so one client covers them.
 
-   ORDER IS THE FAILOVER ORDER, and the first entry is the one a free run leads
-   with. 1412 (TrueModel) sits first because it is the only rung whose models
-   were individually benchmarked — its list is ordered by measured throughput,
-   fastest first, and the rest of the chain stands behind it. */
+   The failover order is `priority`, highest first — see the field's own comment
+   for why it is explicit rather than implied by array position. The shape of it:
+
+     100  1412 (TrueModel)  — the only provider whose models were individually
+                              benchmarked, ordered by measured throughput. This
+                              is the one a run is *supposed* to use.
+      60  Google AI Studio  — strong quality, generous free tier. The intended
+                              second rung.
+      40  NVIDIA NIM        — capable, slower.
+      30  Cerebras
+      20  OpenRouter
+      10  Groq              — LAST RESORT, deliberately.
+
+   Groq sits at the bottom on purpose. It is fast, but its free catalog is a
+   single small open model, and a product brief or a codebase written by it is
+   visibly weaker than one from the rungs above. Being fast is not the same as
+   being good, and for this pipeline quality of instruction-following is what
+   matters. It stays in the chain because having a rung that answers is better
+   than having none — but only after every better option has been tried. */
 const ENV_DEFAULTS: ProviderEntry[] = [
   {
     id: TRUE_PROVIDER.id,
@@ -75,6 +102,7 @@ const ENV_DEFAULTS: ProviderEntry[] = [
     models: TRUE_MODEL_IDS,
     tier: "free",
     enabled: true,
+    priority: 100,
     /* Per-agent pins. The spec and prompt agents are the ones that write prose
        an operator has to read, and gemini-3.6-flash is the fastest model in
        this catalog that holds a long instruction together (48.8 t/s at 1.2s,
@@ -85,18 +113,6 @@ const ENV_DEFAULTS: ProviderEntry[] = [
     notes: TRUE_PROVIDER.notes,
   },
   {
-    id: "groq",
-    label: "Groq",
-    baseUrl: "https://api.groq.com/openai/v1",
-    keyEncrypted: null,
-    keyEnv: "GROQ_API_KEY",
-    models: ["openai/gpt-oss-120b"],
-    tier: "free",
-    enabled: true,
-    agents: {},
-    notes: "30 req/min free, fastest tokens/sec",
-  },
-  {
     id: "gemini",
     label: "Google AI Studio",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
@@ -105,20 +121,9 @@ const ENV_DEFAULTS: ProviderEntry[] = [
     models: ["gemini-2.5-flash"],
     tier: "free",
     enabled: true,
+    priority: 60,
     agents: {},
     notes: "generous free tier, no card, 1M context",
-  },
-  {
-    id: "cerebras",
-    label: "Cerebras",
-    baseUrl: "https://api.cerebras.ai/v1",
-    keyEncrypted: null,
-    keyEnv: "CEREBRAS_API_KEY",
-    models: ["llama-3.3-70b"],
-    tier: "free",
-    enabled: true,
-    agents: {},
-    notes: "~1M tokens/day free",
   },
   {
     id: "nvidia",
@@ -129,8 +134,22 @@ const ENV_DEFAULTS: ProviderEntry[] = [
     models: ["nvidia/llama-3.3-nemotron-super-49b-v1"],
     tier: "free",
     enabled: true,
+    priority: 40,
     agents: {},
     notes: "40 req/min, hosted by NVIDIA",
+  },
+  {
+    id: "cerebras",
+    label: "Cerebras",
+    baseUrl: "https://api.cerebras.ai/v1",
+    keyEncrypted: null,
+    keyEnv: "CEREBRAS_API_KEY",
+    models: ["llama-3.3-70b"],
+    tier: "free",
+    enabled: true,
+    priority: 30,
+    agents: {},
+    notes: "~1M tokens/day free",
   },
   {
     id: "openrouter",
@@ -141,8 +160,22 @@ const ENV_DEFAULTS: ProviderEntry[] = [
     models: ["openrouter/free", "meta-llama/llama-3.3-70b-instruct:free"],
     tier: "free",
     enabled: true,
+    priority: 20,
     agents: {},
     notes: "':free' catalog plus a free router",
+  },
+  {
+    id: "groq",
+    label: "Groq",
+    baseUrl: "https://api.groq.com/openai/v1",
+    keyEncrypted: null,
+    keyEnv: "GROQ_API_KEY",
+    models: ["openai/gpt-oss-120b"],
+    tier: "free",
+    enabled: true,
+    priority: 10,
+    agents: {},
+    notes: "last resort — fast, but the weakest free model in the chain",
   },
 ];
 
@@ -188,10 +221,23 @@ export async function getPlatformData(): Promise<PlatformData> {
 /** New catalog fields must appear for rows written by an older version. */
 function mergeWithDefaults(stored: Partial<PlatformData>): PlatformData {
   const base = defaults();
+  /* A provider row written before `priority` existed has no value for it, and
+     defaulting every one of them to the same number would silently restore the
+     array-order behaviour this field was added to replace. So the default comes
+     from the built-in catalog by id: an old row inherits the intent that was
+     already intended for it, and only a provider we do not recognise falls back
+     to 0 (i.e. last). */
+  const knownPriority = new Map(base.providers.map((p) => [p.id, p.priority]));
+
   return {
-    providers: Array.isArray(stored.providers) && stored.providers.length > 0
-      ? stored.providers.map((p) => ({ ...p, agents: p.agents ?? {} }))
-      : base.providers,
+    providers:
+      Array.isArray(stored.providers) && stored.providers.length > 0
+        ? stored.providers.map((p) => ({
+            ...p,
+            priority: typeof p.priority === "number" ? p.priority : (knownPriority.get(p.id) ?? 0),
+            agents: p.agents ?? {},
+          }))
+        : base.providers,
     infra: { ...base.infra, ...(stored.infra ?? {}) },
     policy: { ...base.policy, ...(stored.policy ?? {}) },
   };
@@ -225,11 +271,23 @@ export type ResolvedProvider = {
   apiKey: string;
   models: string[];
   tier: ModelTier;
+  priority: number;
   agents: Partial<Record<AgentId, string>>;
 };
 
 /** The providers a given plan tier may use, with keys resolved and empty ones
-    dropped. Order is catalog order, which is the failover order. */
+    dropped.
+
+    Two orderings matter here and they are different things:
+
+      · `priority` decides which PROVIDER is reached for first — see the field.
+      · the returned array is sorted by it, so a caller that just walks the list
+        walks the intended failover order.
+
+    A provider whose key does not resolve is dropped entirely rather than tried
+    and failed: an unconfigured rung is not a rung. That is also why a missing
+    1412 key silently demotes the whole chain to the next provider down — the
+    caller sees no error, just a weaker model. */
 export async function resolveProviders(tier: ModelTier): Promise<ResolvedProvider[]> {
   const { providers } = await getPlatformData();
 
@@ -246,10 +304,12 @@ export async function resolveProviders(tier: ModelTier): Promise<ResolvedProvide
         apiKey,
         models: p.models,
         tier: p.tier,
+        priority: p.priority,
         agents: p.agents,
       };
     })
-    .filter((p) => p.apiKey.length > 0 && p.models.length > 0);
+    .filter((p) => p.apiKey.length > 0 && p.models.length > 0)
+    .sort((a, b) => b.priority - a.priority);
 }
 
 /** The operator token for an infrastructure service, falling back to the
