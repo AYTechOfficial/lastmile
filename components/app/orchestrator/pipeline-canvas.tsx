@@ -30,18 +30,29 @@ import type { AgentDTO, RunEventDTO, RunFlowDTO } from "@/lib/run-dto";
 
 export type NodeState = "idle" | "spawning" | "working" | "done" | "failed";
 
-const MAIN = { x: 450, y: 56 };
+const MAIN = { x: 450, y: 64 };
 const NODES: Record<string, { x: number; y: number; label: string; icon: React.ComponentType<{ className?: string }> }> = {
-  research: { x: 96, y: 148, label: "Research", icon: FileSearch },
-  prompt: { x: 264, y: 96, label: "Prompt", icon: FileText },
-  code: { x: 450, y: 178, label: "Code", icon: Hammer },
-  verify: { x: 636, y: 96, label: "Verify", icon: ScanSearch },
-  deploy: { x: 804, y: 148, label: "Deploy", icon: Rocket },
-  test: { x: 450, y: 318, label: "Live QA", icon: FlaskConical },
+  research: { x: 110, y: 190, label: "Research", icon: FileSearch },
+  prompt: { x: 280, y: 150, label: "Prompt", icon: FileText },
+  code: { x: 450, y: 216, label: "Code", icon: Hammer },
+  verify: { x: 620, y: 150, label: "Verify", icon: ScanSearch },
+  deploy: { x: 790, y: 190, label: "Deploy", icon: Rocket },
+  test: { x: 450, y: 388, label: "Live QA", icon: FlaskConical },
 };
 
+/* The worker ring: small agents the Code node spawns on the first pass. They
+   appear only while code is working — the fan-out is real, driven by the same
+   worker events the backend emits (`worker [label] finished — n file(s)`). */
+const WORKERS = [
+  { x: 285, y: 300, label: "W1" },
+  { x: 368, y: 322, label: "W2" },
+  { x: 450, y: 330, label: "W3" },
+  { x: 532, y: 322, label: "W4" },
+  { x: 615, y: 300, label: "W5" },
+];
+
 const W = 900;
-const H = 392;
+const H = 470;
 
 /** curved connector path between two points */
 function curve(from: { x: number; y: number }, to: { x: number; y: number }): string {
@@ -150,11 +161,37 @@ export function PipelineCanvas({
 
   const activeLoop = runStatus === "fixing" || (runStatus === "coding" && lastLoop !== null && iteration > 0);
 
+  /* The real worker story: labels parsed from the code stage's own event
+     lines. A worker that emitted "finished" renders done; one still absent
+     while code runs renders working; nothing renders when code is idle. */
+  const workers = useMemo(() => {
+    const codeState = nodeStateOfAgentOrEvents(byAgent.get("code"), latestLine.has("code"));
+    if (codeState !== "working") return [];
+    const finished = new Set<string>();
+    let spawned = 0;
+    for (const e of events) {
+      if (e.stage !== "code") continue;
+      const m = /splitting the build into (\d+) worker/.exec(e.line);
+      if (m) spawned = Number(m[1]);
+      const f = /worker \[([^\]]+)\] finished/.exec(e.line);
+      if (f) finished.add(f[1]);
+    }
+    if (spawned === 0) return [];
+    return WORKERS.slice(0, Math.min(spawned, WORKERS.length)).map((w, i) => ({
+      ...w,
+      state: (i < finished.size ? "done" : "working") as NodeState,
+    }));
+  }, [events, byAgent, latestLine]);
+
   return (
     <div className="relative w-full overflow-hidden rounded-[16px] border border-edge bg-well">
       <div className="relative" style={{ aspectRatio: `${W} / ${H}`, containerType: "inline-size" }}>
-        {/* ambient grid */}
+        {/* ambient field — grid, drifting stars, nebula wash, radar scan */}
         <div aria-hidden className="rule-grid pointer-events-none absolute inset-0 opacity-30" />
+        <div aria-hidden className="canvas-nebula" />
+        <div aria-hidden className="canvas-stars-far" />
+        <div aria-hidden className="canvas-stars" />
+        {agents.some((a) => a.status === "running") ? <div aria-hidden className="canvas-scan" /> : null}
 
         {/* connector underlay — SAME box as the node layer, so SVG coordinates
             map 1:1 onto the card centers (stretching it over the meter below
@@ -258,6 +295,47 @@ export function PipelineCanvas({
         onClick={() => onSelect("orchestrator")}
       />
 
+      {/* worker ring — real fan-out under the Code node */}
+      {workers.map((w, i) => {
+        const from = { x: NODES.code.x, y: NODES.code.y + 24 };
+        const to = { x: w.x, y: w.y - 18 };
+        const d = curve(from, to);
+        return (
+          <g key={"worker-g-" + i}>
+            <path
+              d={d}
+              fill="none"
+              strokeWidth={1.2}
+              className={w.state === "done" ? "stroke-pass" : "stroke-brand"}
+              opacity={w.state === "done" ? 0.6 : 0.85}
+              strokeDasharray={w.state === "working" ? "4 5" : undefined}
+              style={w.state === "working" ? { animation: "dash-flow 1s linear infinite" } : undefined}
+            />
+            {w.state === "working" ? (
+              <circle r={2.2} fill="#38d9f0">
+                <animateMotion dur="1.1s" repeatCount="indefinite" path={d} />
+              </circle>
+            ) : null}
+          </g>
+        );
+      })}
+      {workers.map((w, i) => (
+        <div
+          key={"worker-" + i}
+          className={cn(
+            "absolute z-10 -translate-x-1/2 -translate-y-1/2 rounded-[9px] border px-1.5 py-1 backdrop-blur-md transition-all duration-300",
+            w.state === "done" ? "border-pass/40 bg-pass/10" : "border-brand/50 bg-surface/90 node-glow",
+          )}
+          style={{ left: (w.x / W) * 100 + "%", top: (w.y / H) * 100 + "%" }}
+        >
+          <span className="flex items-center gap-1">
+            <Hammer className={cn("h-2.5 w-2.5", w.state === "done" ? "text-pass" : "text-brand")} />
+            <span className="font-mono text-[8px] tracking-[0.1em] text-t2">{w.label}</span>
+            {w.state === "working" ? <span className="live-dot h-1 w-1 text-brand" /> : <Check className="h-2.5 w-2.5 text-pass" strokeWidth={3} />}
+          </span>
+        </div>
+      ))}
+
       {/* sub-agents */}
       {Object.entries(NODES).map(([key, n]) => {
         const agent = byAgent.get(key);
@@ -274,6 +352,7 @@ export function PipelineCanvas({
             state={state}
             line={latestLine.get(key) ?? ""}
             badge={key === "test" && failures > 0 ? failures + " failing" : undefined}
+            pulse={workers.some((w) => w.state === "working") && key === "code"}
             onClick={() => onSelect(key)}
           />
         );
@@ -343,6 +422,7 @@ function NodeCard({
   state,
   line: rawLine,
   badge,
+  pulse,
   onClick,
 }: {
   agentKey: string;
@@ -353,6 +433,7 @@ function NodeCard({
   state: NodeState;
   line: string;
   badge?: string;
+  pulse?: boolean;
   onClick: () => void;
 }) {
   /* a node that mounts while its agent is already working just spawned —
@@ -378,7 +459,8 @@ function NodeCard({
         display === "idle" && "border-edge bg-surface/70 opacity-35",
         display === "spawning" && "spawn-pop border-brand/50 bg-surface shadow-[0_0_36px_-6px_rgba(124,122,255,0.6)]",
         (display === "working" || display === "done" || display === "failed") && "border-brand/40 bg-surface/90",
-        display === "working" && "node-glow",
+        display === "working" && !pulse && "node-glow",
+        display === "working" && pulse && "worker-pulse",
         display === "done" && "border-pass/40",
         display === "failed" && "node-shake border-bad/50",
       )}

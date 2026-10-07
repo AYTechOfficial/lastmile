@@ -579,6 +579,91 @@ body {
   animation: meter-lock 0.9s ease-out both;
 }
 
+/* ————— AAA layer: depth, drift and worker motion ————— */
+
+/* slow star drift behind the graph — two layers at different depths */
+.canvas-stars,
+.canvas-stars-far {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.canvas-stars {
+  background-image:
+    radial-gradient(1.2px 1.2px at 12% 24%, rgba(255,255,255,0.55), transparent 60%),
+    radial-gradient(1px 1px at 34% 68%, rgba(255,255,255,0.4), transparent 60%),
+    radial-gradient(1.4px 1.4px at 58% 18%, rgba(124,122,255,0.6), transparent 60%),
+    radial-gradient(1px 1px at 76% 52%, rgba(255,255,255,0.45), transparent 60%),
+    radial-gradient(1.2px 1.2px at 88% 80%, rgba(56,217,240,0.5), transparent 60%),
+    radial-gradient(1px 1px at 22% 86%, rgba(255,255,255,0.35), transparent 60%),
+    radial-gradient(1.3px 1.3px at 46% 40%, rgba(255,255,255,0.5), transparent 60%),
+    radial-gradient(1px 1px at 68% 90%, rgba(124,122,255,0.45), transparent 60%);
+  animation: star-drift 26s linear infinite;
+  opacity: 0.8;
+}
+.canvas-stars-far {
+  background-image:
+    radial-gradient(1px 1px at 8% 60%, rgba(255,255,255,0.28), transparent 60%),
+    radial-gradient(1px 1px at 30% 12%, rgba(255,255,255,0.22), transparent 60%),
+    radial-gradient(1px 1px at 52% 76%, rgba(255,255,255,0.25), transparent 60%),
+    radial-gradient(1px 1px at 72% 34%, rgba(255,255,255,0.2), transparent 60%),
+    radial-gradient(1px 1px at 94% 14%, rgba(255,255,255,0.24), transparent 60%);
+  animation: star-drift 44s linear infinite reverse;
+  opacity: 0.5;
+}
+@keyframes star-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-14px, -22px, 0); }
+}
+
+/* nebula wash — the aurora behind the orchestrator core */
+.canvas-nebula {
+  position: absolute;
+  inset: -20%;
+  pointer-events: none;
+  background:
+    radial-gradient(42% 34% at 50% 16%, rgba(124, 122, 255, 0.14), transparent 70%),
+    radial-gradient(30% 26% at 24% 66%, rgba(56, 217, 240, 0.08), transparent 70%),
+    radial-gradient(30% 26% at 78% 62%, rgba(53, 211, 154, 0.06), transparent 70%);
+  animation: nebula-sway 12s ease-in-out infinite alternate;
+}
+@keyframes nebula-sway {
+  from { transform: translate3d(-1.5%, -1%, 0) scale(1); opacity: 0.85; }
+  to { transform: translate3d(1.5%, 1.5%, 0) scale(1.04); opacity: 1; }
+}
+
+/* worker pulse — the ring beat of a live worker agent */
+@keyframes worker-pulse {
+  0%, 100% { box-shadow: 0 0 12px -4px rgba(56, 217, 240, 0.5); }
+  50% { box-shadow: 0 0 20px -2px rgba(56, 217, 240, 0.85); }
+}
+.worker-pulse {
+  animation: worker-pulse 1.4s ease-in-out infinite;
+}
+
+/* scanning beam across the whole canvas while any stage works — a radar sweep
+   that reads as "the orchestrator is watching its agents" */
+.canvas-scan {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.canvas-scan::after {
+  content: "";
+  position: absolute;
+  left: -20%;
+  top: 0;
+  height: 100%;
+  width: 18%;
+  background: linear-gradient(100deg, transparent, rgba(124, 122, 255, 0.06) 45%, rgba(124, 122, 255, 0.1) 50%, rgba(124, 122, 255, 0.06) 55%, transparent);
+  animation: canvas-sweep 7s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes canvas-sweep {
+  from { transform: translateX(0); }
+  to { transform: translateX(680%); }
+}
+
 /* golden micro-sparks for the ship moment */
 @keyframes gold-rise {
   0% { opacity: 0; transform: translateY(6px) scale(0.6); }
@@ -605,7 +690,12 @@ body {
   .sweep-once,
   .meter-lock,
   .gold-spark,
-  .green-wave {
+  .green-wave,
+  .worker-pulse,
+  .canvas-stars,
+  .canvas-stars-far,
+  .canvas-nebula,
+  .canvas-scan::after {
     animation: none !important;
   }
 }

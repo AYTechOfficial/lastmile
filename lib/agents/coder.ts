@@ -119,10 +119,22 @@ export async function runCoder(input: CodeInput): Promise<CodeResult> {
 
   /* ————— 2. the code ————— */
 
-  const generated = await askModel(input);
+  /* The main coder acts as an orchestrator on the first pass: it splits the
+     product into work packages and spawns WORKER agents — same chain, smaller
+     scope — that write their file groups in parallel. Each worker returns
+     finished files; the main coder merges them into one codebase. Fewer tokens
+     per request, more parallelism, and one bad worker cannot erase the others. */
+  const generated = input.firstPass ? await fanOutWorkers(input) : await askModel(input);
   let files = generated.files;
   const tokens = generated.tokens;
   let reason = generated.reason;
+
+  if (input.firstPass && generated.workers) {
+    await input.emit(
+      "info",
+      `workers: ${generated.workers.spawned} spawned · ${generated.workers.delivered} delivered ${generated.workers.files} file(s) in parallel`,
+    );
+  }
 
   /* The scaffold is always merged in, and always wins on the files it owns.
      That is the guarantee: whatever the model returns, the result has a valid
@@ -215,9 +227,166 @@ async function repoOwner(): Promise<string | null> {
 
 type GeneratedFile = { path: string; content: string };
 
+/* ————————————————————————— the worker fan-out ————————————————————————— */
+
+/** How the first pass is split into worker packages. Deterministic from the
+    spec, so a re-run splits the same way: the main page and one package per
+    extra route, plus a components package when the product is wide enough to
+    have reusable parts. Capped so a huge spec cannot spawn a swarm. */
+function workPackages(input: CodeInput): { label: string; files: string[]; brief: string }[] {
+  const spec = input.spec;
+  const routes = (spec?.routes ?? [{ path: "/", purpose: "the main screen" }]).slice(0, 5);
+  const packages: { label: string; files: string[]; brief: string }[] = [];
+
+  const main = routes[0];
+  packages.push({
+    label: "main screen",
+    files: ["app/page.tsx"],
+    brief: `The product's main screen at ${main.path} — ${main.purpose}. This is the heart of the product; make it complete, polished and real.`,
+  });
+
+  for (const r of routes.slice(1)) {
+    const clean = r.path.replace(/^\//, "").replace(/[^\w-]/g, "-");
+    packages.push({
+      label: `route ${r.path}`,
+      files: [`app/${clean}/page.tsx`],
+      brief: `The ${r.purpose} screen at ${r.path}. It must work with the main screen's data model and feel like the same product.`,
+    });
+  }
+
+  const flowCount = spec?.flows.length ?? 0;
+  if (flowCount >= 3) {
+    packages.push({
+      label: "shared components",
+      files: ["components/ui.tsx"],
+      brief: "The shared UI pieces the other screens import — buttons, cards, list rows, empty states — matching the design system exactly.",
+    });
+  }
+
+  return packages.slice(0, 5);
+}
+
+/** Spawn the workers and wait for all of them. Each worker is a full chat call
+    over the same failover chain with a NARROW brief: it writes only its own
+    files, in full, and returns them. One worker failing costs its files only —
+    the main coder's merge and the fallback page keep the project buildable. */
+async function fanOutWorkers(
+  input: CodeInput,
+): Promise<{ ok: boolean; files: GeneratedFile[]; tokens: number; ms: number; reason?: string; workers?: { spawned: number; delivered: number; files: number } }> {
+  const started = Date.now();
+  const packages = workPackages(input);
+
+  if (packages.length <= 1) {
+    /* Nothing to split — one screen is one worker's job anyway. */
+    const single = await askModel(input);
+    return { ...single, workers: { spawned: 1, delivered: single.ok ? 1 : 0, files: single.files.length } };
+  }
+
+  await input.emit(
+    "info",
+    `-> splitting the build into ${packages.length} worker agent(s): ${packages.map((p) => p.label).join(", ")}`,
+  );
+
+  const results = await Promise.all(
+    packages.map(async (pkg) => {
+      const chatInput: ChatInput = {
+        tier: input.plan.modelTier,
+        userId: input.userId,
+        agent: "code",
+        preferred: input.preferredModel ?? defaultModelFor(input.plan.modelTier),
+        timeoutMs: 240_000,
+        maxRungs: 3,
+        onAttempt: async (attempt) => {
+          if (!attempt.ok) {
+            await input.emit("warn", `  worker [${pkg.label}] rung failed: ${attempt.detail ?? "unknown"}`);
+          }
+        },
+      };
+
+      const { value, result, parseError } = await chatJson<{ files?: GeneratedFile[] }>(chatInput, [
+        {
+          role: "system",
+          content:
+            "You are a worker coding agent. You build ONE part of a larger Next.js product, exactly to your brief. You write complete, working code — no placeholders, no TODOs. You return ONLY files in your own scope.",
+        },
+        { role: "user", content: workerPrompt(input, pkg) },
+      ]);
+
+      const files = sanitize(value?.files ?? []);
+      return { label: pkg.label, ok: result.ok && files.length > 0, files, tokens: result.tokens, reason: result.reason ?? parseError };
+    }),
+  );
+
+  const delivered = results.filter((r) => r.ok);
+  const files = delivered.flatMap((r) => r.files);
+  const tokens = results.reduce((n, r) => n + r.tokens, 0);
+
+  for (const r of results) {
+    await input.emit(
+      r.ok ? "success" : "warn",
+      r.ok ? `  worker [${r.label}] finished — ${r.files.length} file(s)` : `  worker [${r.label}] failed (${r.reason ?? "no usable files"})`,
+    );
+  }
+  await input.heartbeat();
+
+  if (files.length === 0) {
+    /* Every worker failed — fall through to the single-shot path so the stage
+       still produces something buildable. */
+    const single = await askModel(input);
+    return { ...single, tokens: tokens + single.tokens, ms: Date.now() - started, workers: { spawned: packages.length, delivered: 0, files: 0 } };
+  }
+
+  return {
+    ok: true,
+    files,
+    tokens,
+    ms: Date.now() - started,
+    workers: { spawned: packages.length, delivered: delivered.length, files: files.length },
+  };
+}
+
+/** The worker's brief: the same contract the main coder works to, narrowed to
+    the package's files, with the interfaces it must fit (data model, design
+    tokens, the localStorage keys) so separately-written files still compile
+    together. */
+function workerPrompt(input: CodeInput, pkg: { label: string; files: string[]; brief: string }): string {
+  const master = input.master;
+  const spec = input.spec;
+  const table = spec?.dataModel[0] ?? { table: "items", columns: ["id", "title", "created_at"] };
+  const key = `lastmile:${input.slug}:${table.table}`;
+
+  return `You are building ONE part of "${master?.productName ?? input.sentence}". Write ONLY these files:
+${pkg.files.map((f) => `- ${f}`).join("\n")}
+
+YOUR BRIEF
+${pkg.brief}
+
+Reply with ONLY a JSON object of the shape:
+{ "files": [ { "path": "${pkg.files[0]}", "content": "..." } ] }
+
+STRICT RULES
+- Next.js App Router, TypeScript, client components ("use client") where the file renders UI.
+- Tailwind utility classes only.
+- Persistence: localStorage, key exactly "${key}" — the other screens read the same key, so the product works as one.
+- Shared record type (match this exactly): type Record = { id: string; title: string; notes: string; createdAt: string }.
+- If you import a shared component, import it from "@/components/ui" — that file is written by another worker with exports: Card, Button, EmptyState, ListRow.
+- Write REAL content for this specific product. No lorem ipsum, no placeholders, no TODOs.
+- Do not create any file not listed above.
+- Escape all newlines inside "content" correctly so the JSON parses.
+
+DESIGN SYSTEM (use these exact values)
+${master ? `look: ${master.design.look}\nbackground: ${master.design.colors.background}\nsurface: ${master.design.colors.surface}\nprimary: ${master.design.colors.primary}\naccent: ${master.design.colors.accent}\nfont: ${master.design.font}` : "dark, dense, engineering-tool aesthetic; accent #4f8cff"}
+
+FLOWS THIS SCREEN MUST SERVE
+${(spec?.flows ?? []).map((f) => `- ${f.name}: ${f.criteria.join("; ")}`).join("\n") || "- the main flow works end to end"}
+
+EDGE CASES THAT MUST NOT BREAK
+${(master?.edgeCases ?? ["empty lists show a next step", "long text does not break layout"]).map((e) => `- ${e}`).join("\n")}`;
+}
+
 async function askModel(
   input: CodeInput,
-): Promise<{ ok: boolean; files: GeneratedFile[]; tokens: number; ms: number; reason?: string }> {
+): Promise<{ ok: boolean; files: GeneratedFile[]; tokens: number; ms: number; reason?: string; workers?: undefined }> {
   const started = Date.now();
   const chatInput: ChatInput = {
     tier: input.plan.modelTier,
