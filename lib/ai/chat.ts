@@ -28,7 +28,12 @@
    with the reasons attached, so a stage can decide whether to degrade or stop —
    and the run's log gets the honest story instead of a bare "AI failed". */
 
-import { TRUE_MODEL_IDS, PREFERRED_FREE_MODEL } from "./catalog";
+import {
+  AION_MODEL_IDS,
+  HCNSEC_MODEL_IDS,
+  PREFERRED_FREE_MODEL,
+  TRUE_MODEL_IDS,
+} from "./catalog";
 import { resolveProviders, type ResolvedProvider } from "../platform/settings";
 import { activeUserProviders } from "../platform/user-providers";
 import type { AgentId } from "../platform/settings";
@@ -113,6 +118,19 @@ async function buildRungs(input: ChatInput): Promise<Rung[]> {
   const rungs: Rung[] = [];
   const preferred = input.preferred?.trim() || null;
 
+  /* A choice from the run-start picker is "provider/model" — the same model id
+     can exist on two providers at different speeds, and picking one should not
+     silently mean the other. The prefix is only a provider qualifier when it
+     names a provider this run can actually use; everything else (the automatic
+     default, per-agent pins, older stored choices) is a bare model id and keeps
+     its old meaning. Model ids themselves contain slashes (nvidia/llama-…), so
+     the prefix MATCH is what disambiguates, not the slash count. */
+  const slash = preferred ? preferred.indexOf("/") : -1;
+  const prefix = slash > 0 ? preferred!.slice(0, slash) : null;
+  const bare = slash > 0 ? preferred!.slice(slash + 1) : preferred;
+  let preferredProvider: string | null = null;
+  let preferredModel: string | null = preferred;
+
   /* Rank is GROUP PRIORITY minus the position inside that provider's own model
      order. Two properties fall out of that, and both are load-bearing:
 
@@ -146,11 +164,10 @@ async function buildRungs(input: ChatInput): Promise<Rung[]> {
   /* Rung group 1 — the user's own endpoints. The 10,000 base is deliberate: a
      user's own key always outranks the platform's, because they are paying for
      it, and no platform priority value can be set high enough to jump it. */
-  if (input.userId) {
-    const own = await activeUserProviders(input.userId);
-    for (const p of own) {
-      push(p, orderModels(p.models, preferred), 10_000);
-    }
+  const own = input.userId ? await activeUserProviders(input.userId) : [];
+  const ownIds = own.map((p) => p.id);
+  for (const p of own) {
+    push(p, orderModels(p.models, preferredModel), 10_000);
   }
 
   /* Rung group 2 — the platform catalog for this plan tier, ordered by the
@@ -158,7 +175,18 @@ async function buildRungs(input: ChatInput): Promise<Rung[]> {
   const platform = await resolveProviders(input.tier);
   for (const p of platform) {
     const pinned = input.agent ? p.agents[input.agent] : undefined;
-    push(p, orderModels(p.models, preferred, pinned), p.priority);
+    push(p, orderModels(p.models, preferredModel, pinned), p.priority);
+  }
+
+  /* Resolve the qualifier now that every provider id is known, then lift the
+     exact (provider, model) rung the user picked above the rest of the platform
+     section — but below the user's own paid endpoints (10_000), which always
+     outrank the platform's at every step. */
+  if (prefix && bare && [...ownIds, ...platform.map((p) => p.id)].includes(prefix)) {
+    preferredProvider = prefix;
+    preferredModel = bare;
+    const exact = rungs.find((r) => r.id === preferredProvider && r.model === preferredModel);
+    if (exact) exact.rank = 9_000;
   }
 
   rungs.sort((a, b) => b.rank - a.rank);
@@ -552,31 +580,44 @@ export function defaultModelFor(tier: ModelTier): string | null {
   return null;
 }
 
-/** Every model a plan tier may actually use, for the run-start picker. */
+/** Every model a plan tier may actually use, for the run-start picker.
+
+    The id is qualified — `provider/model` — because the same model id can be
+    carried by two providers at different speeds, and picking "glm-5.3" must
+    mean the one on the provider whose latency you saw. The chain reads the
+    qualifier back (see buildRungs). */
 export async function selectableModels(tier: ModelTier): Promise<
-  { id: string; provider: string; providerLabel: string }[]
+  { id: string; model: string; provider: string; providerLabel: string }[]
 > {
   const providers: ResolvedProvider[] = await resolveProviders(tier);
   const seen = new Set<string>();
-  const out: { id: string; provider: string; providerLabel: string }[] = [];
+  const out: { id: string; model: string; provider: string; providerLabel: string }[] = [];
+  const qualify = (providerId: string, model: string) => `${providerId}/${model}`;
 
-  /* The measured free catalog leads, so the picker shows the fast models first
+  /* The measured free catalogs lead, so the picker shows the fast models first
      rather than whatever order the JSON happens to be in. */
   if (tier === "free") {
-    for (const id of TRUE_MODEL_IDS) {
-      const owner = providers.find((p) => p.models.includes(id));
-      if (owner && !seen.has(id)) {
-        seen.add(id);
-        out.push({ id, provider: owner.id, providerLabel: owner.label });
-      }
+    const measuredOrder: [string, string][] = [
+      ...TRUE_MODEL_IDS.map((id) => ["truemodel", id] as [string, string]),
+      ...HCNSEC_MODEL_IDS.map((id) => ["hcnsec", id] as [string, string]),
+      ...AION_MODEL_IDS.map((id) => ["aionlabs", id] as [string, string]),
+    ];
+    for (const [providerId, model] of measuredOrder) {
+      const owner = providers.find((p) => p.id === providerId && p.models.includes(model));
+      if (!owner) continue;
+      const key = qualify(providerId, model);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ id: key, model, provider: owner.id, providerLabel: owner.label });
     }
   }
 
   for (const p of providers) {
     for (const model of p.models) {
-      if (seen.has(model)) continue;
-      seen.add(model);
-      out.push({ id: model, provider: p.id, providerLabel: p.label });
+      const key = qualify(p.id, model);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ id: key, model, provider: p.id, providerLabel: p.label });
     }
   }
 

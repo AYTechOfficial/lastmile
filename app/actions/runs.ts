@@ -14,7 +14,7 @@ import { rateLimit } from "@/lib/rate-limit";
 import { normalizeSentence, slugify, titleFrom, SENTENCE_MAX, SENTENCE_MIN } from "@/lib/slug";
 import { defaultModelFor, selectableModels } from "@/lib/ai/chat";
 import { searchOrder, searchProviderStates } from "@/lib/ai/search";
-import { describeModel, TRUE_MODELS } from "@/lib/ai/catalog";
+import { AION_MODELS, describeModel, HCNSEC_MODELS, TRUE_MODELS } from "@/lib/ai/catalog";
 import type { RunOptionsDTO } from "@/lib/ai/options";
 
 /* Run actions — the only place the dashboard touches the pipeline.
@@ -312,12 +312,38 @@ export async function runOptions(userId: string): Promise<RunOptionsDTO> {
     searchProviderStates(userId),
   ]);
 
-  /* The measured catalog is the only place latency/throughput is known, so the
-     note is attached here rather than invented per provider. */
-  const measured = new Map(TRUE_MODELS.map((m) => [m.id, describeModel(m)]));
+  /* The measured catalogs are the only place latency/throughput is known, so
+     the note is attached here rather than invented per provider — keyed by the
+     qualified id the picker now uses, since the same model can sit on two
+     providers at different speeds. */
+  const measured = new Map<string, string>();
+  for (const [providerId, list] of [
+    ["truemodel", TRUE_MODELS],
+    ["hcnsec", HCNSEC_MODELS],
+    ["aionlabs", AION_MODELS],
+  ] as const) {
+    for (const m of list) measured.set(`${providerId}/${m.id}`, describeModel(m));
+  }
+
+  const modelOptions = models.map((m) => ({ ...m, note: measured.get(m.id) }));
+
+  /* Clustered for the picker: one row per provider, its models behind it. The
+     order is the chain's own priority order, so the top cluster is the one a
+     run actually leads with. */
+  const clusterOrder: { id: string; label: string }[] = [];
+  for (const m of modelOptions) {
+    if (!clusterOrder.some((c) => c.id === m.provider)) {
+      clusterOrder.push({ id: m.provider, label: m.providerLabel });
+    }
+  }
 
   return {
-    models: models.map((m) => ({ ...m, note: measured.get(m.id) })),
+    models: modelOptions,
+    groups: clusterOrder.map((c) => ({
+      provider: c.id,
+      providerLabel: c.label,
+      models: modelOptions.filter((m) => m.provider === c.id),
+    })),
     search: search.map((s) => ({
       id: s.id,
       label: s.label,

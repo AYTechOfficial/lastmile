@@ -58,8 +58,41 @@ export const TRUE_MODELS: CatalogModel[] = [
   { id: "gpt-5.6", tps: 0.5, latencyMs: 5930 },
 ];
 
+/** Measured 2026-10-07 against https://api.hcnsec.cn/v1 — 21 models listed,
+    14 probed as chat models, 10 answered with real text (the rest: 404 "model
+    is not found", 500 "no available channel", or a timeout). The thinking
+    models need an uncapped reply budget — with a small `max_tokens` they spend
+    it all reasoning and return empty content, so the ordering below puts the
+    models that answer plainly first and flags the thinkers `partial`. */
+export const HCNSEC_MODELS: CatalogModel[] = [
+  { id: "DeepSeek-V4-Pro", tps: 5.6, latencyMs: 1439 },
+  { id: "DeepSeek-V4-Flash", tps: 3.7, latencyMs: 2151 },
+  { id: "MiMo-V2.6-Flash", tps: 2.1, latencyMs: 3852 },
+  { id: "Qwen3.8-Flash-Next", tps: 1.7, latencyMs: 4547 },
+  { id: "step-5-preview", tps: 1.4, latencyMs: 3217, partial: true },
+  { id: "Qwen3.8-27B", tps: 1.3, latencyMs: 4929, partial: true },
+  { id: "sensenova-6.8-flash-lite", tps: 1.1, latencyMs: 3159, partial: true },
+  { id: "DeepSeek-V4.1-Flash", tps: 0.4, latencyMs: 10254, partial: true },
+  { id: "longcat-2.5", tps: 0.2, latencyMs: 14302, partial: true },
+  { id: "glm-5.3-flash", tps: 0.2, latencyMs: 14244, partial: true },
+];
+
+/** Measured 2026-10-07 against https://api.aionlabs.ai/v1 — 6 models listed;
+    the five chat models all answered. The sixth (aion-rp-llama-3.1-8b) is a
+    roleplay model, not something a build pipeline can plan with, and is left
+    out of the chain for the same reason the OCR model is. */
+export const AION_MODELS: CatalogModel[] = [
+  { id: "aion-labs/aion-3.0", tps: 4.4, latencyMs: 1360 },
+  { id: "aion-labs/aion-3.0-mini", tps: 4.3, latencyMs: 1382 },
+  { id: "aion-labs/aion-3.5-mini", tps: 4.2, latencyMs: 1433 },
+  { id: "aion-labs/aion-3.5", tps: 3.8, latencyMs: 1470 },
+  { id: "aion-labs/aion-2.0", tps: 2.1, latencyMs: 2150 },
+];
+
 /** Just the ids, in failover order. This is what the provider catalog stores. */
 export const TRUE_MODEL_IDS: string[] = TRUE_MODELS.map((m) => m.id);
+export const HCNSEC_MODEL_IDS: string[] = HCNSEC_MODELS.map((m) => m.id);
+export const AION_MODEL_IDS: string[] = AION_MODELS.map((m) => m.id);
 
 /** The single model a run reaches for first when the user expressed no
     preference: the fastest one that answered cleanly. Chosen rather than
@@ -82,4 +115,20 @@ export const TRUE_PROVIDER = {
   baseUrl: "https://1412520.bond/v1",
   keyEnv: "TRUEMODEL_API_KEY",
   notes: "21 of 30 models verified working; ordered by measured throughput",
+} as const;
+
+export const HCNSEC_PROVIDER = {
+  id: "hcnsec",
+  label: "HCNSEC",
+  baseUrl: "https://api.hcnsec.cn/v1",
+  keyEnv: "HCNSEC_API_KEY",
+  notes: "10 of 14 chat models verified; carries DeepSeek, GLM, Qwen and Step models",
+} as const;
+
+export const AION_PROVIDER = {
+  id: "aionlabs",
+  label: "Aion Labs",
+  baseUrl: "https://api.aionlabs.ai/v1",
+  keyEnv: "AION_API_KEY",
+  notes: "5 of 5 chat models verified; uncensored, unrestricted models",
 } as const;

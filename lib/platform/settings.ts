@@ -3,7 +3,7 @@ import { db } from "../db";
 import { platformSettings } from "../schema";
 import { decryptSecret, encryptSecret } from "../crypto";
 import type { ModelTier, PlanId } from "../plans";
-import { TRUE_MODEL_IDS, TRUE_PROVIDER } from "../ai/catalog";
+import { AION_MODEL_IDS, AION_PROVIDER, HCNSEC_MODEL_IDS, HCNSEC_PROVIDER, TRUE_MODEL_IDS, TRUE_PROVIDER } from "../ai/catalog";
 
 /* Operator configuration — everything the admin panel edits, in one row.
 
@@ -81,6 +81,8 @@ export type PlatformData = {
                               is the one a run is *supposed* to use.
       60  Google AI Studio  — strong quality, generous free tier. The intended
                               second rung.
+      55  HCNSEC            — verified 2026-10-07; carries DeepSeek/GLM/Qwen.
+      50  Aion Labs         — verified 2026-10-07; uncensored catalog.
       40  NVIDIA NIM        — capable, slower.
       30  Cerebras
       20  OpenRouter
@@ -124,6 +126,32 @@ const ENV_DEFAULTS: ProviderEntry[] = [
     priority: 60,
     agents: {},
     notes: "generous free tier, no card, 1M context",
+  },
+  {
+    id: HCNSEC_PROVIDER.id,
+    label: HCNSEC_PROVIDER.label,
+    baseUrl: HCNSEC_PROVIDER.baseUrl,
+    keyEncrypted: null,
+    keyEnv: HCNSEC_PROVIDER.keyEnv,
+    models: HCNSEC_MODEL_IDS,
+    tier: "free",
+    enabled: true,
+    priority: 55,
+    agents: {},
+    notes: HCNSEC_PROVIDER.notes,
+  },
+  {
+    id: AION_PROVIDER.id,
+    label: AION_PROVIDER.label,
+    baseUrl: AION_PROVIDER.baseUrl,
+    keyEncrypted: null,
+    keyEnv: AION_PROVIDER.keyEnv,
+    models: AION_MODEL_IDS,
+    tier: "free",
+    enabled: true,
+    priority: 50,
+    agents: {},
+    notes: AION_PROVIDER.notes,
   },
   {
     id: "nvidia",

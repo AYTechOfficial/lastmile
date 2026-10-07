@@ -1,7 +1,20 @@
 "use client";
 
 import { useActionState, useRef, useState } from "react";
-import { ArrowUp, CornerDownLeft, Cpu, Globe, Loader2, Sparkles, Zap } from "lucide-react";
+import {
+  ArrowUp,
+  Boxes,
+  CornerDownLeft,
+  Cpu,
+  FlaskConical,
+  Gauge,
+  Globe,
+  Loader2,
+  Route,
+  ShieldCheck,
+  Sparkles,
+  Zap,
+} from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Kbd, btn } from "@/components/kit";
 import { createRunAction, type CreateRunState } from "@/app/actions/runs";
@@ -15,6 +28,20 @@ const EXAMPLES = [
 ];
 
 const STEPS = ["research", "spec", "you approve", "build", "deploy", "verify"];
+
+/* One mark per provider. The cluster row carries it, and so does the MODEL
+   button once a specific model is chosen — a glance tells you whose weights
+   will build the product. */
+const PROVIDER_ICONS: Record<string, React.ReactNode> = {
+  truemodel: <Zap className="h-3.5 w-3.5" />,
+  hcnsec: <ShieldCheck className="h-3.5 w-3.5" />,
+  aionlabs: <FlaskConical className="h-3.5 w-3.5" />,
+  gemini: <Sparkles className="h-3.5 w-3.5" />,
+  nvidia: <Cpu className="h-3.5 w-3.5" />,
+  cerebras: <Boxes className="h-3.5 w-3.5" />,
+  openrouter: <Route className="h-3.5 w-3.5" />,
+  groq: <Gauge className="h-3.5 w-3.5" />,
+};
 
 /* The composer is the product's front door. It does four jobs now: take one
    sentence, let the user pick the model and the search engine (or say nothing
@@ -37,6 +64,7 @@ export function Composer({ options }: { options: RunOptionsDTO }) {
 
   const chosenModel = options.models.find((m) => m.id === model);
   const chosenSearch = options.search.find((s) => s.id === search);
+  const modelIcon = chosenModel ? (PROVIDER_ICONS[chosenModel.provider] ?? <Boxes className="h-3.5 w-3.5" />) : null;
 
   return (
     <section
@@ -101,9 +129,9 @@ export function Composer({ options }: { options: RunOptionsDTO }) {
           <div className="border-t border-edge px-4 py-2.5 md:px-5">
             <div className="flex flex-wrap items-center gap-2">
               <PickerButton
-                icon={<Cpu className="h-3.5 w-3.5" />}
+                icon={modelIcon ?? <Cpu className="h-3.5 w-3.5" />}
                 label="Model"
-                value={chosenModel ? chosenModel.id : "automatic — fastest verified"}
+                value={chosenModel ? chosenModel.model : "automatic — fastest verified"}
                 active={open === "model"}
                 onClick={() => setOpen(open === "model" ? "none" : "model")}
               />
@@ -151,16 +179,15 @@ export function Composer({ options }: { options: RunOptionsDTO }) {
                   primary="Automatic"
                   secondary="the fastest model that answers"
                 />
-                {options.models.map((m) => (
-                  <Choice
-                    key={m.id}
-                    selected={model === m.id}
-                    onClick={() => {
-                      setModel(m.id);
+                {options.groups.map((g) => (
+                  <ProviderCluster
+                    key={g.provider}
+                    group={g}
+                    selectedId={model}
+                    onPick={(qualified) => {
+                      setModel(qualified);
                       setOpen("none");
                     }}
-                    primary={m.id}
-                    secondary={m.providerLabel + (m.note ? " · " + m.note : "")}
                   />
                 ))}
                 {options.models.length === 0 ? (
@@ -317,6 +344,93 @@ function ChoicePanel({
         <p className="mt-1 text-[11px] leading-snug text-t3">{note}</p>
       </div>
       <div className="thin-scroll max-h-[240px] overflow-y-auto py-1">{children}</div>
+    </div>
+  );
+}
+
+/* One provider row that folds out to its models. Hover opens it, moving away
+   closes it, clicking pins it — so a touch screen gets the same list without a
+   hover. The fold-out is where the same-model-different-speed story shows:
+   glm-5.3 under 1412 and glm-5.3 under HCNSEC are two rows with two numbers. */
+function ProviderCluster({
+  group,
+  selectedId,
+  onPick,
+}: {
+  group: RunOptionsDTO["groups"][number];
+  selectedId: string;
+  onPick: (qualifiedId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const chosenHere = group.models.some((m) => m.id === selectedId);
+  const fastest = group.models[0];
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const enter = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    setOpen(true);
+  };
+  const leave = () => {
+    if (pinned) return;
+    closeTimer.current = setTimeout(() => setOpen(false), 180);
+  };
+
+  return (
+    <div
+      onMouseEnter={enter}
+      onMouseLeave={leave}
+      className={cn(open && "bg-surface2/40")}
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => {
+          setPinned(!open);
+          setOpen(!open);
+        }}
+        className={cn(
+          "flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors",
+          chosenHere ? "text-t1" : "text-t2 hover:text-t1",
+        )}
+      >
+        <span
+          className={cn(
+            "flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] border",
+            chosenHere ? "border-brand/40 bg-brand/15 text-brand" : "border-edge bg-surface2 text-t3",
+          )}
+        >
+          {PROVIDER_ICONS[group.provider] ?? <Boxes className="h-3 w-3" />}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[12px] font-medium">{group.providerLabel}</span>
+          <span className="mt-0.5 block truncate text-[10.5px] text-t3">
+            {group.models.length} model{group.models.length === 1 ? "" : "s"}
+            {fastest ? " · fastest " + fastest.model + (fastest.note ? " · " + fastest.note : "") : ""}
+          </span>
+        </span>
+        <span
+          className={cn(
+            "shrink-0 font-mono text-[9px] tracking-[0.12em] text-t3 transition-transform",
+            open && "rotate-90",
+          )}
+        >
+          ▸
+        </span>
+      </button>
+      {open ? (
+        <div className="border-t border-edge/60 pl-4">
+          {group.models.map((m) => (
+            <Choice
+              key={m.id}
+              selected={selectedId === m.id}
+              onClick={() => onPick(m.id)}
+              primary={m.model}
+              secondary={m.note ?? m.providerLabel}
+            />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

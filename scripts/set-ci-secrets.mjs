@@ -35,6 +35,8 @@ const MAPPING = {
   /* The free tier's primary model provider — the runner leads its chain with
      this one. Without it the run falls through to the providers below. */
   TRUEMODEL_API_KEY: "TRUEMODEL_API_KEY",
+  HCNSEC_API_KEY: "HCNSEC_API_KEY",
+  AION_API_KEY: "AION_API_KEY",
   EXA_API_KEY: "EXA_API_KEY",
   GROQ_API_KEY: "GROQ_API_KEY",
   GEMINI_API_KEY: "GEMINI_API_KEY",
