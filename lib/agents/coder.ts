@@ -368,7 +368,10 @@ function scaffold(input: CodeInput): GeneratedFile[] {
           version: "0.1.0",
           private: true,
           scripts: { dev: "next dev", build: "next build", start: "next start" },
-          dependencies: { next: "15.5.4", react: "19.1.1", "react-dom": "19.1.1" },
+          /* Pinned to the exact trio this platform itself builds with on
+             Vercel. Older Next majors are rejected at deploy time as
+             vulnerable — which is a deploy-stage failure, not a fix round. */
+          dependencies: { next: "16.3.6", react: "19.2.8", "react-dom": "19.2.8" },
           devDependencies: {
             "@tailwindcss/postcss": "^4",
             "@types/node": "^20",
