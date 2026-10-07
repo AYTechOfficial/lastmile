@@ -1,10 +1,16 @@
 import type { JobKind, TestReport } from "../lib/domain";
 import type { PlanConfig } from "../lib/plans";
 import type { StageOutcome } from "../lib/pipeline/state";
-import type { runEvents, runs } from "../lib/schema";
+import { recordIssues } from "../lib/pipeline/issues";
+import { db } from "../lib/db";
+import { eq } from "drizzle-orm";
+import { runEvents, runs } from "../lib/schema";
 import { runResearch } from "../lib/agents/research";
 import { runPrompt } from "../lib/agents/prompt";
 import { runCoder } from "../lib/agents/coder";
+import { runVerifier } from "../lib/agents/verify";
+import { runDeployer } from "../lib/agents/deploy";
+import { runTester } from "../lib/agents/tester";
 
 /* The stage registry.
 
@@ -241,11 +247,147 @@ async function saveCode(runId: string, result: { repo: { owner: string; name: st
     .where(eq(runs.id, runId));
 }
 
+/* ————————————————————————— verify ————————————————————————— */
+
+/** The Verifier. Clones the repo, really builds it, sweeps the structure, and
+    reviews the code against the master prompt. Every finding lands in the
+    defect ledger; the blocking count is what drives the fix loop. */
+const verify: StageExecutor = async (ctx) => {
+  const started = Date.now();
+
+  const result = await runVerifier({
+    plan: ctx.plan,
+    userId: ctx.userId,
+    preferredModel: ctx.run.modelChoice,
+    master: (ctx.run.masterPrompt ?? null) as Parameters<typeof runVerifier>[0]["master"],
+    spec: (ctx.run.spec ?? null) as Parameters<typeof runVerifier>[0]["spec"],
+    repo: ctx.repo,
+    iteration: ctx.iteration,
+    emit: ctx.emit,
+    heartbeat: ctx.heartbeat,
+  });
+
+  const recorded = await recordIssues(ctx.run.id, ctx.iteration, "verify", result.issues);
+
+  if (ctx.repo) {
+    await db
+      .update(runs)
+      .set({ qualityScore: result.score })
+      .where(eq(runs.id, ctx.run.id));
+  }
+
+  await ctx.emit(
+    "info",
+    `verify finished in ${Math.round((Date.now() - started) / 1000)}s · ${recorded.total} issue(s), ${recorded.blocking} blocking · score ${result.score}/100`,
+  );
+  if (!result.ok) {
+    return {
+      ok: false,
+      issues: recorded.total,
+      blocking: recorded.blocking,
+      reason: result.reason ?? "the verifier could not run",
+      tokens: result.tokens,
+    };
+  }
+
+  return {
+    ok: true,
+    issues: recorded.total,
+    blocking: recorded.blocking,
+    verifyScore: result.score,
+    tokens: result.tokens,
+  };
+};
+
+/* ————————————————————————— deploy ————————————————————————— */
+
+/** The Deployer. Sends the verified repo to Vercel and waits for the URL.
+    The URL is persisted the moment it exists, so a crash after deploy does
+    not redeploy — the run resumes knowing where it lives. */
+const deploy: StageExecutor = async (ctx) => {
+  const result = await runDeployer({
+    plan: ctx.plan,
+    emit: ctx.emit,
+    heartbeat: ctx.heartbeat,
+    repo: ctx.repo ? { owner: ctx.repo.owner, name: ctx.repo.name } : null,
+    slug: ctx.run.slug,
+  });
+
+  if (!result.ok || !result.url) {
+    return {
+      ok: false,
+      issues: 0,
+      blocking: 0,
+      reason: result.reason ?? "the deployment did not come up",
+      tokens: result.tokens,
+    };
+  }
+  await db
+    .update(runs)
+    .set({ liveUrl: result.url })
+    .where(eq(runs.id, ctx.run.id));
+
+  return { ok: true, issues: 0, blocking: 0, liveUrl: result.url, tokens: result.tokens };
+};
+
+/* ————————————————————————— test ————————————————————————— */
+
+/** The Live QA pass. Drives the deployed URL — mechanically first, then with
+    the model against the acceptance flows. Blocking findings loop the run
+    back to the coder, exactly like verify's do. */
+const test: StageExecutor = async (ctx) => {
+  const started = Date.now();
+
+  const result = await runTester({
+    plan: ctx.plan,
+    userId: ctx.userId,
+    preferredModel: ctx.run.modelChoice,
+    spec: (ctx.run.spec ?? null) as Parameters<typeof runTester>[0]["spec"],
+    url: ctx.liveUrl,
+    iteration: ctx.iteration,
+    emit: ctx.emit,
+    heartbeat: ctx.heartbeat,
+  });
+
+  const recorded = await recordIssues(ctx.run.id, ctx.iteration, "test", result.issues);
+
+  await db
+    .update(runs)
+    .set({ testReport: result.report })
+    .where(eq(runs.id, ctx.run.id));
+
+  await ctx.emit(
+    "info",
+    `test finished in ${Math.round((Date.now() - started) / 1000)}s · ${recorded.total} issue(s), ${recorded.blocking} blocking · score ${result.score}/100 · browser: ${result.report.browser}`,
+  );
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      issues: recorded.total,
+      blocking: recorded.blocking,
+      reason: result.reason ?? "the live QA pass could not run",
+      tokens: result.tokens,
+    };
+  }
+
+  return {
+    ok: true,
+    issues: recorded.total,
+    blocking: recorded.blocking,
+    testScore: result.score,
+    tokens: result.tokens,
+  };
+};
+
 /** Stages that can actually run. Filled in as each agent lands. */
 export const STAGE_EXECUTORS: Partial<Record<JobKind, StageExecutor>> = {
   research,
   prompt,
   code,
+  verify,
+  deploy,
+  test,
 };
 
 export function hasExecutor(kind: JobKind): boolean {
