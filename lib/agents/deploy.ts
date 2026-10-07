@@ -97,7 +97,7 @@ export async function runDeployer(input: DeployInput): Promise<DeployResult> {
         await input.emit("warn", `-> skipped ${file.path} — the deployment bundle budget is spent`);
         continue;
       }
-      const res = await fetch(`${API}/v2/files${teamQs}`, {
+      const res = await fetch(`${API}/v2/now/files${teamQs}`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -119,15 +119,17 @@ export async function runDeployer(input: DeployInput): Promise<DeployResult> {
       }
     }
 
-    /* ————— create the deployment ————— */
+    /* ————— create the deployment —————
+       The manifest shape is Vercel's own documented one: each entry names the
+       file by path, digest and size — the same digest the upload declared. */
     const framework = await detectFramework(dir);
     const body = {
       name: `lastmile-${sanitize(input.slug)}`,
       target: "production",
-      files: files.map((f) => ({ sha: f.sha, size: f.size })),
-      projectSettings: framework ? { framework } : undefined,
+      files: files.map((f) => ({ file: f.path, sha: f.sha, size: f.size })),
+      projectSettings: { framework },
     };
-    const createRes = await fetch(`${API}/v13/deployments${teamQs}`, {
+    const createRes = await fetch(`${API}/v12/now/deployments${teamQs}`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -151,7 +153,7 @@ export async function runDeployer(input: DeployInput): Promise<DeployResult> {
       const deadline = Date.now() + DEPLOY_TIMEOUT_MS;
       while (Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 8_000));
-        const poll = await fetch(`${API}/v13/deployments/${created.id}${teamQs}`, {
+        const poll = await fetch(`${API}/v12/now/deployments/${created.id}${teamQs}`, {
           headers: { Authorization: `Bearer ${token}` },
           signal: AbortSignal.timeout(30_000),
         });
