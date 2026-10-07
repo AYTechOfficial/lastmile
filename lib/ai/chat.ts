@@ -113,21 +113,41 @@ async function buildRungs(input: ChatInput): Promise<Rung[]> {
   const rungs: Rung[] = [];
   const preferred = input.preferred?.trim() || null;
 
+  /* Rank is GROUP PRIORITY minus the position inside that provider's own model
+     order. Two properties fall out of that, and both are load-bearing:
+
+       · Within a provider, the order is exactly what `orderModels` decided —
+         the carried-and-preferred models first, the rest behind them.
+       · Across providers, a group's priority dominates, so a user's own
+         endpoint always outranks the platform's.
+
+     The subtraction is what stops a preferred model from jumping the queue on a
+     provider that does not carry it. Ranking by a fixed "is this the preferred
+     model" score did exactly that: asking for gemini-2.5-flash made Groq try
+     gemini-2.5-flash first and 404, on every provider, before its real model
+     answered. The preferred model still leads — on the provider that has it. */
+  const push = (
+    p: { id: string; label: string; baseUrl: string; apiKey: string },
+    models: string[],
+    groupPriority: number,
+  ) => {
+    models.forEach((model, index) => {
+      rungs.push({
+        id: p.id,
+        label: p.label,
+        baseUrl: p.baseUrl,
+        apiKey: p.apiKey,
+        model,
+        rank: groupPriority - index,
+      });
+    });
+  };
+
   /* Rung group 1 — the user's own endpoints. */
   if (input.userId) {
     const own = await activeUserProviders(input.userId);
     for (const p of own) {
-      const models = orderModels(p.models, preferred);
-      for (const model of models) {
-        rungs.push({
-          id: p.id,
-          label: p.label,
-          baseUrl: p.baseUrl,
-          apiKey: p.apiKey,
-          model,
-          rank: model === preferred ? 400 : 300,
-        });
-      }
+      push(p, orderModels(p.models, preferred), 1000);
     }
   }
 
@@ -135,21 +155,7 @@ async function buildRungs(input: ChatInput): Promise<Rung[]> {
   const platform = await resolveProviders(input.tier);
   for (const p of platform) {
     const pinned = input.agent ? p.agents[input.agent] : undefined;
-    const models = orderModels(p.models, preferred, pinned);
-    for (const model of models) {
-      const rank =
-        model === preferred ? 350
-        : model === pinned ? 250
-        : /* the platform's own measured order is the default preference */ 100;
-      rungs.push({
-        id: p.id,
-        label: p.label,
-        baseUrl: p.baseUrl,
-        apiKey: p.apiKey,
-        model,
-        rank,
-      });
-    }
+    push(p, orderModels(p.models, preferred, pinned), 100);
   }
 
   rungs.sort((a, b) => b.rank - a.rank);

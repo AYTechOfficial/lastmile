@@ -75,7 +75,13 @@ const ENV_DEFAULTS: ProviderEntry[] = [
     models: TRUE_MODEL_IDS,
     tier: "free",
     enabled: true,
-    agents: {},
+    /* Per-agent pins. The spec and prompt agents are the ones that write prose
+       an operator has to read, and gemini-3.6-flash is the fastest model in
+       this catalog that holds a long instruction together (48.8 t/s at 1.2s,
+       measured). Pinning them keeps the checkpoint's output stable run to run
+       instead of following whatever the failover chain happened to land on.
+       A pin is still only a preference: the chain stands behind it. */
+    agents: { spec: "gemini-3.6-flash", prompt: "gemini-3.6-flash" },
     notes: TRUE_PROVIDER.notes,
   },
   {

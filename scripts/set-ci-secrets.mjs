@@ -32,6 +32,10 @@ const repo = process.argv[2]?.trim() || process.env.RUNNER_REPO?.trim() || "AYTe
 const MAPPING = {
   DATABASE_URL: "DATABASE_URL",
   AUTH_SECRET: "AUTH_SECRET",
+  /* The free tier's primary model provider — the runner leads its chain with
+     this one. Without it the run falls through to the providers below. */
+  TRUEMODEL_API_KEY: "TRUEMODEL_API_KEY",
+  EXA_API_KEY: "EXA_API_KEY",
   GROQ_API_KEY: "GROQ_API_KEY",
   GEMINI_API_KEY: "GEMINI_API_KEY",
   NVIDIA_API_KEY: "NVIDIA_API_KEY",
