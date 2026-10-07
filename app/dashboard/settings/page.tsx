@@ -133,15 +133,18 @@ export default async function SettingsPage() {
                 freeTier={s.freeTier}
                 signupUrl={s.signupUrl}
                 configured={s.configured}
-                keyless={s.id === "keyless"}
+                keyless={s.keyless}
               />
             ))}
           </div>
         </Panel>
 
         <p className="text-[12.5px] leading-relaxed text-t3">
-          Without a search key the agent still works — it falls back to keyless search and page reading.
-          A dedicated provider returns longer excerpts, which makes the brief noticeably sharper.
+          The agent walks this list in order and uses the first engine that answers, so search can never
+          fail a run. Everything below Tavily is keyless and independent — DuckDuckGo, Hacker News, Stack
+          Exchange, GitHub and Wikipedia — which means five separate services have to be down at once
+          before a query comes back empty. A keyed provider returns longer excerpts, which makes the
+          brief noticeably sharper, but it is never required.
         </p>
       </section>
 

@@ -95,6 +95,16 @@ async function probeSearch(key: string): Promise<ProbeResult> {
   return expectOk(res, "Tavily");
 }
 
+async function probeExa(key: string): Promise<ProbeResult> {
+  const res = await fetch("https://api.exa.ai/search", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": key },
+    body: JSON.stringify({ query: "connectivity check", numResults: 1 }),
+    signal: timeout(),
+  });
+  return expectOk(res, "Exa");
+}
+
 async function probeBrowser(key: string): Promise<ProbeResult> {
   const base = (
     process.env.BROWSER_USE_BASE_URL ?? "https://api.browser-use.com/api/v3"
@@ -119,6 +129,7 @@ const PROBES: Record<ServiceId, (value: string) => Promise<ProbeResult>> = {
   vercel: probeVercel,
   render: probeRender,
   search: probeSearch,
+  exa: probeExa,
   browser: probeBrowser,
 };
 

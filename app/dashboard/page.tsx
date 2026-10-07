@@ -5,6 +5,7 @@ import { Activity, ArrowRight, ShieldCheck, Timer, UserCheck } from "lucide-reac
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { runs } from "@/lib/schema";
+import { runOptions } from "@/app/actions/runs";
 import { fmtDuration, fmtTokens } from "@/lib/run-dto";
 import { Sparkline } from "@/components/kit";
 import { Composer } from "@/components/app/composer";
@@ -31,6 +32,10 @@ export default async function DashboardPage() {
     .where(eq(runs.userId, session.user.id))
     .orderBy(desc(runs.createdAt))
     .limit(60);
+
+  /* What this plan may choose from, resolved server-side so the picker cannot
+     offer a model the user is not entitled to. */
+  const options = await runOptions(session.user.id);
 
   const verified = rows.filter((r) => r.status === "done");
   const awaiting = rows.filter((r) => r.status === "awaiting_approval");
@@ -99,7 +104,7 @@ export default async function DashboardPage() {
         </div>
       ) : null}
 
-      <Composer />
+      <Composer options={options} />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Tile

@@ -123,7 +123,7 @@ export const userCredentials = app.table(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    /** github | vercel | render | search | browser */
+    /** github | vercel | render | search | exa | browser */
     service: text("service").notNull(),
     valueEncrypted: text("value_encrypted").notNull(),
     /** the account or scope this credential belongs to, verified on save */
@@ -172,6 +172,14 @@ export const runs = app.table(
     /** which plan policy governed this run — recorded so old runs stay readable
         after the policy changes */
     planId: text("plan_id").notNull().default("free"),
+
+    /** A model the user picked when starting the run, or null to let the chain
+        choose the fastest available. Recorded rather than resolved at start
+        time so a run stays reproducible after the catalog changes. */
+    modelChoice: text("model_choice"),
+    /** A search engine the user picked, or null for the default chain order
+        (Tavily → Exa → DuckDuckGo → Wikipedia). */
+    searchChoice: text("search_choice"),
 
     /** ResearchBrief */
     research: jsonb("research"),

@@ -1,10 +1,11 @@
 "use client";
 
 import { useActionState, useRef, useState } from "react";
-import { ArrowUp, CornerDownLeft, Loader2, Sparkles } from "lucide-react";
+import { ArrowUp, CornerDownLeft, Cpu, Globe, Loader2, Sparkles, Zap } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Kbd, btn } from "@/components/kit";
 import { createRunAction, type CreateRunState } from "@/app/actions/runs";
+import type { RunOptionsDTO } from "@/lib/ai/options";
 
 const EXAMPLES = [
   "A CRM for freelance photographers",
@@ -15,20 +16,43 @@ const EXAMPLES = [
 
 const STEPS = ["research", "spec", "you approve", "build", "deploy", "verify"];
 
-/* The composer is the product's front door. It does three jobs: take one
-   sentence, teach what happens to it, and get out of the way. */
-export function Composer() {
+/* The composer is the product's front door. It does four jobs now: take one
+   sentence, let the user pick the model and the search engine (or say nothing
+   and let the system choose the fastest), teach what happens to the sentence,
+   and get out of the way.
+
+   The pickers are deliberately collapsed to a single line by default. The
+   automatic path is the recommended one — a user who does not care should never
+   have to make a decision — so the controls only unfold when asked for. */
+export function Composer({ options }: { options: RunOptionsDTO }) {
   const [state, formAction, pending] = useActionState<CreateRunState, FormData>(createRunAction, {});
   const [sentence, setSentence] = useState("");
   const [focused, setFocused] = useState(false);
+  const [model, setModel] = useState<string>(""); // "" = automatic
+  const [search, setSearch] = useState<string>(""); // "" = automatic
+  const [open, setOpen] = useState<"none" | "model" | "search">("none");
   const formRef = useRef<HTMLFormElement>(null);
   const len = sentence.trim().length;
   const ready = len >= 10 && len <= 200;
 
+  const chosenModel = options.models.find((m) => m.id === model);
+  const chosenSearch = options.search.find((s) => s.id === search);
+
   return (
-    <section id="compose" className={cn("scroll-mt-24 rounded-[16px] p-[1px] transition-colors duration-300", focused ? "bg-gradient-to-r from-brand/60 via-info/35 to-brand/60" : "bg-edge")}>
+    <section
+      id="compose"
+      className={cn(
+        "scroll-mt-24 rounded-[16px] p-[1px] transition-colors duration-300",
+        focused ? "bg-gradient-to-r from-brand/60 via-info/35 to-brand/60" : "bg-edge",
+      )}
+    >
       <div className="rounded-[15px] bg-surface">
         <form ref={formRef} action={formAction}>
+          {/* the two choices ride along as hidden fields — the visible controls
+              below are just the picker UI */}
+          <input type="hidden" name="model" value={model} />
+          <input type="hidden" name="search" value={search} />
+
           <div className="flex items-start gap-3 px-4 pt-4 md:px-5">
             <span
               className={cn(
@@ -65,10 +89,125 @@ export function Composer() {
           </div>
 
           {state.error ? (
-            <p role="alert" className="mx-4 mb-2 rounded-[10px] border border-bad/30 bg-bad/10 px-3 py-2 text-[12.5px] text-bad md:mx-5">
+            <p
+              role="alert"
+              className="mx-4 mb-2 rounded-[10px] border border-bad/30 bg-bad/10 px-3 py-2 text-[12.5px] text-bad md:mx-5"
+            >
               {state.error}
             </p>
           ) : null}
+
+          {/* ————— the run's two choices ————— */}
+          <div className="border-t border-edge px-4 py-2.5 md:px-5">
+            <div className="flex flex-wrap items-center gap-2">
+              <PickerButton
+                icon={<Cpu className="h-3.5 w-3.5" />}
+                label="Model"
+                value={chosenModel ? chosenModel.id : "automatic — fastest verified"}
+                active={open === "model"}
+                onClick={() => setOpen(open === "model" ? "none" : "model")}
+              />
+              <PickerButton
+                icon={<Globe className="h-3.5 w-3.5" />}
+                label="Search"
+                value={chosenSearch ? chosenSearch.label : "automatic chain"}
+                active={open === "search"}
+                onClick={() => setOpen(open === "search" ? "none" : "search")}
+              />
+              {!model && !search ? (
+                <span className="flex items-center gap-1.5 text-[11px] text-t3">
+                  <Zap className="h-3 w-3 text-brand" />
+                  we pick the fastest model and the first search engine that answers
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setModel("");
+                    setSearch("");
+                  }}
+                  className="text-[11px] text-t3 underline decoration-dotted underline-offset-2 transition-colors hover:text-t2"
+                >
+                  reset to automatic
+                </button>
+              )}
+            </div>
+
+            {open === "model" ? (
+              <ChoicePanel
+                title="Free models, fastest first"
+                note={
+                  options.automaticModel
+                    ? `Automatic leads with ${options.automaticModel} and falls through the rest if it fails.`
+                    : "Automatic leads with the first model and falls through the rest if it fails."
+                }
+              >
+                <Choice
+                  selected={model === ""}
+                  onClick={() => {
+                    setModel("");
+                    setOpen("none");
+                  }}
+                  primary="Automatic"
+                  secondary="the fastest model that answers"
+                />
+                {options.models.map((m) => (
+                  <Choice
+                    key={m.id}
+                    selected={model === m.id}
+                    onClick={() => {
+                      setModel(m.id);
+                      setOpen("none");
+                    }}
+                    primary={m.id}
+                    secondary={m.providerLabel + (m.note ? " · " + m.note : "")}
+                  />
+                ))}
+                {options.models.length === 0 ? (
+                  <p className="px-3 py-2 text-[11.5px] text-t3">
+                    No model is configured for this plan yet — the run will still start and report what
+                    is missing.
+                  </p>
+                ) : null}
+              </ChoicePanel>
+            ) : null}
+
+            {open === "search" ? (
+              <ChoicePanel
+                title="Where the Research Agent looks"
+                note="Whatever you pick, the rest of the chain stays behind it — search is never a single point of failure."
+              >
+                <Choice
+                  selected={search === ""}
+                  onClick={() => {
+                    setSearch("");
+                    setOpen("none");
+                  }}
+                  primary="Automatic chain"
+                  secondary="Tavily → Exa → DuckDuckGo → Wikipedia"
+                />
+                {options.search.map((s) => (
+                  <Choice
+                    key={s.id}
+                    selected={search === s.id}
+                    onClick={() => {
+                      setSearch(s.id);
+                      setOpen("none");
+                    }}
+                    primary={s.label}
+                    secondary={
+                      s.keyless
+                        ? "no key needed — always available"
+                        : s.configured
+                          ? "key configured"
+                          : "no key — will be skipped"
+                    }
+                    dim={!s.keyless && !s.configured}
+                  />
+                ))}
+              </ChoicePanel>
+            ) : null}
+          </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-edge px-4 py-3 md:px-5">
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
@@ -127,5 +266,97 @@ export function Composer() {
         </div>
       </div>
     </section>
+  );
+}
+
+function PickerButton({
+  icon,
+  label,
+  value,
+  active,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={active}
+      className={cn(
+        "flex max-w-full items-center gap-2 rounded-[10px] border px-2.5 py-1.5 text-left transition-colors",
+        active
+          ? "border-brand/40 bg-brand/12"
+          : "border-edge bg-surface2/60 hover:border-edge2",
+      )}
+    >
+      <span className={active ? "text-brand" : "text-t3"}>{icon}</span>
+      <span className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-t3">{label}</span>
+      <span className="truncate text-[12px] text-t1">{value}</span>
+    </button>
+  );
+}
+
+function ChoicePanel({
+  title,
+  note,
+  children,
+}: {
+  title: string;
+  note: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mt-2.5 overflow-hidden rounded-[12px] border border-edge bg-surface2/30">
+      <div className="border-b border-edge px-3 py-2">
+        <p className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-t3">{title}</p>
+        <p className="mt-1 text-[11px] leading-snug text-t3">{note}</p>
+      </div>
+      <div className="thin-scroll max-h-[240px] overflow-y-auto py-1">{children}</div>
+    </div>
+  );
+}
+
+function Choice({
+  selected,
+  onClick,
+  primary,
+  secondary,
+  dim,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  primary: string;
+  secondary: string;
+  dim?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={selected}
+      className={cn(
+        "flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors",
+        selected ? "bg-brand/12" : "hover:bg-surface2",
+        dim && !selected ? "opacity-55" : "",
+      )}
+    >
+      <span className="min-w-0">
+        <span
+          className={cn(
+            "block truncate font-mono text-[11.5px]",
+            selected ? "text-brand" : "text-t1",
+          )}
+        >
+          {primary}
+        </span>
+        <span className="mt-0.5 block truncate text-[10.5px] text-t3">{secondary}</span>
+      </span>
+      {selected ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand" /> : null}
+    </button>
   );
 }

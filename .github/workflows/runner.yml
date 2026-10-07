@@ -57,14 +57,19 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
 
-          # Platform model credentials for the free tier
+          # Platform model credentials. 1412/TrueModel leads the free chain;
+          # the rest stand behind it so one provider outage is not a run failure.
+          TRUEMODEL_API_KEY: ${{ secrets.TRUEMODEL_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
 
-          # Search and live QA
+          # Search and live QA. The last two search rungs are keyless, so a
+          # missing key degrades the brief rather than stopping the run.
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
           BROWSER_USE_API_KEY: ${{ secrets.BROWSER_USE_API_KEY }}
+          BROWSER_USE_BASE_URL: ${{ secrets.BROWSER_USE_BASE_URL }}
 
           # Repos and deploys
           GITHUB_TOKEN: ${{ secrets.PLATFORM_GITHUB_TOKEN }}

@@ -3,6 +3,7 @@ import { db } from "../db";
 import { platformSettings } from "../schema";
 import { decryptSecret, encryptSecret } from "../crypto";
 import type { ModelTier, PlanId } from "../plans";
+import { TRUE_MODEL_IDS, TRUE_PROVIDER } from "../ai/catalog";
 
 /* Operator configuration — everything the admin panel edits, in one row.
 
@@ -58,8 +59,25 @@ export type PlatformData = {
 };
 
 /* The env-configured providers, used until an operator edits the catalog. All of
-   these speak the OpenAI chat-completions dialect, so one client covers them. */
+   these speak the OpenAI chat-completions dialect, so one client covers them.
+
+   ORDER IS THE FAILOVER ORDER, and the first entry is the one a free run leads
+   with. 1412 (TrueModel) sits first because it is the only rung whose models
+   were individually benchmarked — its list is ordered by measured throughput,
+   fastest first, and the rest of the chain stands behind it. */
 const ENV_DEFAULTS: ProviderEntry[] = [
+  {
+    id: TRUE_PROVIDER.id,
+    label: TRUE_PROVIDER.label,
+    baseUrl: TRUE_PROVIDER.baseUrl,
+    keyEncrypted: null,
+    keyEnv: TRUE_PROVIDER.keyEnv,
+    models: TRUE_MODEL_IDS,
+    tier: "free",
+    enabled: true,
+    agents: {},
+    notes: TRUE_PROVIDER.notes,
+  },
   {
     id: "groq",
     label: "Groq",

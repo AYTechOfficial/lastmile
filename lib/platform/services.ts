@@ -20,7 +20,7 @@ import { getPlatformData } from "./settings";
    box for someone who signs up and types a sentence, without handing them the
    operator's keys. */
 
-export type ServiceId = "github" | "vercel" | "render" | "search" | "browser";
+export type ServiceId = "github" | "vercel" | "render" | "search" | "exa" | "browser";
 
 export type ServiceDef = {
   id: ServiceId;
@@ -61,11 +61,19 @@ export const SERVICES: ServiceDef[] = [
   },
   {
     id: "search",
-    label: "Web search",
+    label: "Web search (Tavily)",
     envVar: "TAVILY_API_KEY",
     userBenefit: "Your own research quota, so long runs never queue behind the platform's.",
     keysUrl: "https://app.tavily.com/home",
     placeholder: "tvly-…",
+  },
+  {
+    id: "exa",
+    label: "Web search (Exa)",
+    envVar: "EXA_API_KEY",
+    userBenefit: "A semantic index that catches the queries a keyword engine misses.",
+    keysUrl: "https://exa.ai",
+    placeholder: "exa-…",
   },
   {
     id: "browser",

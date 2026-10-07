@@ -132,6 +132,9 @@ async function main(): Promise<void> {
       },
       liveUrl: run.liveUrl,
       repo: run.repoOwner && run.repoName ? { owner: run.repoOwner, name: run.repoName } : null,
+      /* The owning user, so a stage resolves that user's own credentials rather
+         than the platform's. */
+      userId: run.userId,
     });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);

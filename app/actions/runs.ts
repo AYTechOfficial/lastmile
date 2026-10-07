@@ -12,6 +12,10 @@ import { logEvent } from "@/lib/events";
 import { dispatchRunner } from "@/lib/platform/runner";
 import { rateLimit } from "@/lib/rate-limit";
 import { normalizeSentence, slugify, titleFrom, SENTENCE_MAX, SENTENCE_MIN } from "@/lib/slug";
+import { defaultModelFor, selectableModels } from "@/lib/ai/chat";
+import { searchOrder, searchProviderStates } from "@/lib/ai/search";
+import { describeModel, TRUE_MODELS } from "@/lib/ai/catalog";
+import type { RunOptionsDTO } from "@/lib/ai/options";
 
 /* Run actions — the only place the dashboard touches the pipeline.
 
@@ -58,6 +62,16 @@ export async function createRunAction(
 
   const tier = planOf(user?.plan);
 
+  /* The two choices the composer offers. Both are validated against what the
+     plan may actually use, so a tampered form cannot pin a run to a model or an
+     engine the user is not entitled to — and an unknown value degrades to the
+     automatic choice rather than failing the run. */
+  const chosenModel = String(formData.get("model") ?? "").trim();
+  const chosenSearch = String(formData.get("search") ?? "").trim();
+
+  const modelChoice = await validModelChoice(tier, chosenModel);
+  const searchChoice = validSearchChoice(chosenSearch);
+
   const todays = await db
     .select({ n: count() })
     .from(runs)
@@ -89,6 +103,8 @@ export async function createRunAction(
       status: "queued",
       currentStage: "research",
       planId: tier.id,
+      modelChoice,
+      searchChoice,
       startedAt: now,
     })
     .returning();
@@ -98,6 +114,20 @@ export async function createRunAction(
     "research",
     "command",
     `$ lastmile run #${run.runNumber} — "${sentence}"`,
+  );
+  await logEvent(
+    run.id,
+    "research",
+    "info",
+    modelChoice
+      ? `model pinned to ${modelChoice}`
+      : "model: automatic — the fastest verified model in the chain",
+  );
+  await logEvent(
+    run.id,
+    "research",
+    "info",
+    `search: ${searchChoice ?? "automatic"} (Tavily → Exa → DuckDuckGo → Wikipedia, first that answers)`,
   );
 
   const job = await enqueue({ runId: run.id, kind: "research" });
@@ -262,4 +292,57 @@ export async function listRuns(userId: string) {
     .from(runs)
     .where(eq(runs.userId, userId))
     .orderBy(asc(runs.createdAt));
+}
+
+/* ————————————————————————— run-start choices ————————————————————————— */
+
+/** The models this plan may actually pick from, and the engines it may pick.
+    Read by the composer so the options are never invented client-side. */
+export async function runOptions(userId: string): Promise<RunOptionsDTO> {
+  const [user] = await db
+    .select({ plan: users.plan })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  const tier = planOf(user?.plan);
+
+  const [models, search] = await Promise.all([
+    selectableModels(tier.modelTier),
+    searchProviderStates(userId),
+  ]);
+
+  /* The measured catalog is the only place latency/throughput is known, so the
+     note is attached here rather than invented per provider. */
+  const measured = new Map(TRUE_MODELS.map((m) => [m.id, describeModel(m)]));
+
+  return {
+    models: models.map((m) => ({ ...m, note: measured.get(m.id) })),
+    search: search.map((s) => ({
+      id: s.id,
+      label: s.label,
+      configured: s.configured,
+      keyless: s.keyless,
+    })),
+    plan: tier.id,
+    automaticModel: defaultModelFor(tier.modelTier),
+  };
+}
+
+/** A model id is accepted only if the plan's catalog actually offers it. An
+    unknown id silently becomes "automatic" — the run must not fail because a
+    stale client posted a model that has since been retired. */
+async function validModelChoice(
+  tier: ReturnType<typeof planOf>,
+  chosen: string,
+): Promise<string | null> {
+  if (!chosen) return null;
+  const available = await selectableModels(tier.modelTier);
+  return available.some((m) => m.id === chosen) ? chosen : null;
+}
+
+/** Same rule for the search engine: only the engines the chain knows. */
+function validSearchChoice(chosen: string): string | null {
+  const value = chosen.trim().toLowerCase();
+  return (searchOrder() as string[]).includes(value) ? value : null;
 }
