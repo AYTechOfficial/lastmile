@@ -114,6 +114,60 @@ export async function ensureRepo(
   }
 }
 
+/** Every file path in the repo, via the recursive Trees API — one call for the
+    whole workspace, which is what the run page's Code tab renders. */
+export async function listRepoFiles(
+  owner: string,
+  name: string,
+): Promise<string[] | null> {
+  const a = await auth(owner);
+  if (!a) return null;
+  try {
+    const ref = await fetch(`${API}/repos/${owner}/${name}/git/ref/heads/main`, {
+      headers: headers(a.token),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!ref.ok) return null;
+    const refBody = (await ref.json()) as { object?: { sha?: string } };
+    const sha = refBody.object?.sha;
+    if (!sha) return null;
+
+    const tree = await fetch(`${API}/repos/${owner}/${name}/git/trees/${sha}?recursive=1`, {
+      headers: headers(a.token),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!tree.ok) return null;
+    const body = (await tree.json()) as { tree?: { path?: string; type?: string; truncated?: boolean }[] };
+    return (body.tree ?? [])
+      .filter((e) => e.type === "blob" && e.path)
+      .map((e) => e.path as string)
+      .filter((p) => !p.startsWith(".git/"))
+      .sort();
+  } catch {
+    return null;
+  }
+}
+
+/** One file's decoded text, via the Contents API. */
+export async function getRepoFile(
+  owner: string,
+  name: string,
+  path: string,
+): Promise<string | null> {
+  const a = await auth(owner);
+  if (!a) return null;
+  try {
+    const res = await fetch(`${API}/repos/${owner}/${name}/contents/${encodeURI(path)}?ref=main`, {
+      headers: { ...headers(a.token), Accept: "application/vnd.github.raw+json" },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) return null;
+    return await res.text();
+  } catch {
+    return null;
+  }
+}
+
 /** The tip of the branch the run commits to, so a fix round lands on top of the
     previous commit instead of replacing it. */
 export async function latestSha(owner: string, name: string, branch: string): Promise<string | null> {

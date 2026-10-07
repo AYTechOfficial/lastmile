@@ -262,11 +262,16 @@ const verify: StageExecutor = async (ctx) => {
     master: (ctx.run.masterPrompt ?? null) as Parameters<typeof runVerifier>[0]["master"],
     spec: (ctx.run.spec ?? null) as Parameters<typeof runVerifier>[0]["spec"],
     repo: ctx.repo,
-    iteration: ctx.iteration,
-    emit: ctx.emit,
+    iteration: ctx.iteration,    emit: ctx.emit,
     heartbeat: ctx.heartbeat,
   });
 
+  /* Only critical defects block shipping. Majors stay in the ledger for the
+     user and the next fix round, but a build that compiles, serves its routes
+     and scores well must reach a URL — the previous rule counted every major
+     as blocking, which burned the loop budget on advisories and finished runs
+     without ever deploying them. */
+  const critical = result.issues.filter((i) => i.severity === "critical").length;
   const recorded = await recordIssues(ctx.run.id, ctx.iteration, "verify", result.issues);
 
   if (ctx.repo) {
@@ -278,13 +283,14 @@ const verify: StageExecutor = async (ctx) => {
 
   await ctx.emit(
     "info",
-    `verify finished in ${Math.round((Date.now() - started) / 1000)}s · ${recorded.total} issue(s), ${recorded.blocking} blocking · score ${result.score}/100`,
+    `verify finished in ${Math.round((Date.now() - started) / 1000)}s · ${recorded.total} issue(s), ${critical} blocking · score ${result.score}/100`,
   );
+
   if (!result.ok) {
     return {
       ok: false,
       issues: recorded.total,
-      blocking: recorded.blocking,
+      blocking: critical,
       reason: result.reason ?? "the verifier could not run",
       tokens: result.tokens,
     };
@@ -293,7 +299,7 @@ const verify: StageExecutor = async (ctx) => {
   return {
     ok: true,
     issues: recorded.total,
-    blocking: recorded.blocking,
+    blocking: critical,
     verifyScore: result.score,
     tokens: result.tokens,
   };
