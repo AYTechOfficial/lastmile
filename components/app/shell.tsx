@@ -179,14 +179,16 @@ export function Shell({
               onClick={closeNav}
               title={item.label}
               className={cn(
-                "flex items-center gap-2.5 rounded-[10px] px-3 py-2 text-[13px] transition-colors",
+                "relative flex items-center gap-2.5 rounded-[10px] px-3 py-2 text-[13px] transition-colors",
                 railCollapsed && "justify-center px-0",
-                active ? "bg-surface2 font-medium text-t1" : "text-t2 hover:bg-surface2/60 hover:text-t1",
+                active
+                  ? "bg-[linear-gradient(90deg,rgba(124,122,255,0.16),rgba(124,122,255,0.03))] font-medium text-t1 [box-shadow:inset_2px_0_0_var(--app-brand)]"
+                  : "text-t2 hover:bg-surface2/60 hover:text-t1",
               )}
             >
               <item.icon className={cn("h-4 w-4", active ? "text-brand" : "text-t3")} />
               {!railCollapsed && item.label}
-              {active && !railCollapsed ? <span className="ml-auto h-1 w-1 rounded-full bg-brand" /> : null}
+              {active && !railCollapsed ? <span className="live-dot ml-auto h-1 w-1 text-brand" /> : null}
             </Link>
           );
         })}
@@ -292,15 +294,17 @@ export function Shell({
 
   return (
     <div className="min-h-screen bg-app text-t1">
-      {/* ambient structure — one grid, no glow */}
+      {/* ambient structure — a fine grid, a cold aurora bloom, and a floor glow */}
       <div aria-hidden className="pointer-events-none fixed inset-0 z-0">
         <div className="rule-grid absolute inset-0 opacity-40 [mask-image:radial-gradient(ellipse_70%_50%_at_50%_0%,black,transparent_75%)]" />
-        <div className="absolute -top-40 left-1/2 h-[420px] w-[900px] -translate-x-1/2 rounded-full bg-brand/[0.06] blur-[140px]" />
+        <div className="absolute -top-52 left-1/2 h-[480px] w-[980px] -translate-x-1/2 rounded-full bg-[radial-gradient(ellipse_at_center,rgba(124,122,255,0.09),rgba(76,201,240,0.04)_55%,transparent_75%)] blur-[110px]" />
+        <div className="absolute bottom-0 left-0 right-0 h-[320px] bg-[radial-gradient(60%_100%_at_50%_100%,rgba(124,122,255,0.05),transparent_70%)]" />
       </div>
 
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-40 hidden border-r border-edge bg-well/80 backdrop-blur-xl transition-[width] duration-200 ease-out md:block",
+          "fixed inset-y-0 left-0 z-40 hidden border-r border-edge bg-[linear-gradient(180deg,rgba(14,16,24,0.88),rgba(6,7,12,0.92))] backdrop-blur-xl transition-[width] duration-200 ease-out md:block",
+          "[box-shadow:1px_0_0_0_rgba(255,255,255,0.04)_inset,24px_0_60px_-40px_rgba(0,0,0,0.9)]",
           collapsed ? "w-[64px]" : "w-[248px]",
         )}
       >
@@ -327,7 +331,7 @@ export function Shell({
           collapsed ? "md:pl-[64px]" : "md:pl-[248px]",
         )}
       >
-        <header className="sticky top-0 z-30 border-b border-edge bg-app/85 backdrop-blur-xl">
+        <header className="sticky top-0 z-30 border-b border-edge bg-[linear-gradient(180deg,rgba(10,11,16,0.92),rgba(10,11,16,0.78))] backdrop-blur-xl [box-shadow:0_1px_0_0_rgba(255,255,255,0.03)_inset]">
           <div className="flex h-14 items-center gap-3 px-4 md:px-6">
             <button
               type="button"
@@ -349,7 +353,7 @@ export function Shell({
               <button
                 type="button"
                 onClick={() => setPaletteOpen(true)}
-                className="flex h-8 items-center gap-2 rounded-[9px] border border-edge bg-surface px-2.5 text-[12px] text-t3 transition-colors hover:border-edge2 hover:text-t2"
+                className="flex h-8 items-center gap-2 rounded-[9px] border border-edge bg-surface/80 px-2.5 text-[12px] text-t3 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)] transition-colors hover:border-edge2 hover:text-t2"
               >
                 <Search className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Search</span>

@@ -71,10 +71,12 @@ export function Composer({ options }: { options: RunOptionsDTO }) {
       id="compose"
       className={cn(
         "scroll-mt-24 rounded-[16px] p-[1px] transition-colors duration-300",
-        focused ? "bg-gradient-to-r from-brand/60 via-info/35 to-brand/60" : "bg-edge",
+        focused
+          ? "bg-[conic-gradient(from_140deg_at_50%_50%,rgba(124,122,255,0.75),rgba(76,201,240,0.45),rgba(124,122,255,0.75))] shadow-[0_0_50px_-16px_rgba(124,122,255,0.6)]"
+          : "bg-edge",
       )}
     >
-      <div className="rounded-[15px] bg-surface">
+      <div className="rounded-[15px] bg-[linear-gradient(180deg,rgba(255,255,255,0.03),transparent_90px),var(--app-surface)] shadow-[0_24px_60px_-36px_rgba(0,0,0,0.9)]">
         <form ref={formRef} action={formAction}>
           {/* the two choices ride along as hidden fields — the visible controls
               below are just the picker UI */}

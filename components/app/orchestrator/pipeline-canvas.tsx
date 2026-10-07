@@ -10,21 +10,22 @@ import {
   Hammer,
   Rocket,
   ScanSearch,
-  Sparkles,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { AgentDTO, RunEventDTO, RunFlowDTO } from "@/lib/run-dto";
 
-/* The Agent Orchestration Deck — the signature view, rebuilt as a cinematic
-   3D scene: a perspective stage in deep space. The orchestrator is a glowing
-   gyroscope core; every agent is a floating dome bot (visor, antenna,
-   grounding shadow, holo plate) that bobs on its own beat, lights up while
-   working, and seals green when done. Worker drones orbit the Code bot on a
-   real elliptical track with depth — they pass BEHIND the pod, shrink, and
-   dim, then swing back around to the front.
+/* The Agent Orchestration Deck — v3.
 
-   Every pixel of state is still derived from real backend artifacts:
+   The stage is authored in a fixed 1000×660 "design space" and scaled to fit
+   its container with a single transform (ResizeObserver → --oc3-s). Every
+   position and size below is therefore exact at any render width: plates can
+   never collide, labels can never clip, connectors always meet the pods.
+
+   The agents are little robots with faces — a glass dome, two glowing eyes
+   that blink and glance around, a chest core, hovering on a flickering
+   thruster. The orchestrator is a bigger ringed station whose eyes follow
+   the cursor. State still comes only from real backend artifacts:
      node state   ← agent_runs.status (queued/running/done/failed)
      status line  ← the agent's own latest event line (typewritten as it lands)
      workers      ← labels parsed from the code stage's fan-out events
@@ -36,20 +37,41 @@ import type { AgentDTO, RunEventDTO, RunFlowDTO } from "@/lib/run-dto";
 
 export type NodeState = "idle" | "working" | "done" | "failed";
 
+/* ————————————————— design space ————————————————— */
+
 const W = 1000;
 const H = 660;
 
-const MAIN = { x: 500, y: 118 };
-/** where the spawn links leave the core's plate */
-const SPAWN_FROM = { x: 500, y: 240 };
+/** the orchestrator station */
+const MAIN = { x: 500, y: 126 };
+/** links to code/test leave from under the core's plate; the rest from the pod */
+const SPAWN_POD = { x: 500, y: 168 };
+const SPAWN_UNDER = { x: 500, y: 220 };
 
-const NODES: Record<string, { x: number; y: number; label: string; icon: React.ComponentType<{ className?: string }> }> = {
-  research: { x: 118, y: 322, label: "Research", icon: FileSearch },
-  prompt: { x: 309, y: 276, label: "Prompt", icon: FileText },
-  code: { x: 500, y: 266, label: "Code", icon: Hammer },
-  verify: { x: 691, y: 276, label: "Verify", icon: ScanSearch },
-  deploy: { x: 882, y: 322, label: "Deploy", icon: Rocket },
-  test: { x: 500, y: 492, label: "Live QA", icon: FlaskConical },
+/**
+ * Stage layout — the six stage bots on a shallow arc under the core, Live QA
+ * below. Every label box (118×~56 + 3-line slack) is placed to a fixed rule
+ * so boxes can never overlap each other, the core, or the HUD:
+ *   outer bots (research/deploy) → box centred under the pod
+ *   inner bots (prompt/code/verify/test) → box centred under the pod
+ * Core plate sits beside the station, clear of the prompt/verify pods.
+ */
+const NODES: Record<
+  string,
+  {
+    x: number;
+    y: number;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+    tag: "below" | "below" | "left" | "right";
+  }
+> = {
+  research: { x: 104, y: 318, label: "Research", icon: FileSearch, tag: "below" },
+  prompt: { x: 298, y: 252, label: "Prompt", icon: FileText, tag: "below" },
+  code: { x: 500, y: 262, label: "Code", icon: Hammer, tag: "below" },
+  verify: { x: 702, y: 252, label: "Verify", icon: ScanSearch, tag: "below" },
+  deploy: { x: 896, y: 318, label: "Deploy", icon: Rocket, tag: "below" },
+  test: { x: 500, y: 484, label: "Live QA", icon: FlaskConical, tag: "below" },
 };
 
 const NODE_ORDER = ["research", "prompt", "code", "verify", "deploy", "test"] as const;
@@ -62,35 +84,33 @@ const CHAIN: [string, string][] = [
   ["deploy", "test"],
 ];
 
-/** worker drone orbit — an ellipse around the Code pod */
-const ORBIT = { rx: 92, ry: 26 };
+/** worker drone orbit — an ellipse around the Code robot */
+const ORBIT = { rx: 100, ry: 24 };
 
 /** state → glow / accent, fed to CSS as --glow / --acc */
 const STATE_GLOW: Record<NodeState, string> = {
   idle: "rgba(130,134,190,0.35)",
-  working: "rgba(124,122,255,0.85)",
+  working: "rgba(124,122,255,0.9)",
   done: "rgba(53,211,154,0.7)",
-  failed: "rgba(255,107,90,0.8)",
+  failed: "rgba(255,107,90,0.85)",
 };
 const STATE_ACC: Record<NodeState, string> = {
   idle: "rgba(158,162,212,0.85)",
-  working: "rgba(170,168,255,0.95)",
-  done: "rgba(72,226,172,0.95)",
-  failed: "rgba(255,124,108,0.95)",
+  working: "rgba(174,172,255,0.98)",
+  done: "rgba(72,226,172,0.98)",
+  failed: "rgba(255,124,108,0.98)",
 };
-
-const px = (v: number, total: number) => (v / total) * 100 + "%";
 
 const vars = (o: Record<string, string | number>) => o as React.CSSProperties;
 
-/** curved connector path between two points */
+/** curved connector path between two points (bows sideways, never vertical-s) */
 function curve(from: { x: number; y: number }, to: { x: number; y: number }): string {
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const midX = from.x + dx / 2;
   const midY = from.y + dy / 2;
   const bow = Math.min(52, Math.abs(dx) * 0.16 + 12) * (dx >= 0 ? 1 : -1);
-  return `M ${from.x} ${from.y} C ${midX + bow} ${midY - 30}, ${midX + bow} ${midY + 30}, ${to.x} ${to.y}`;
+  return `M ${from.x} ${from.y} C ${midX + bow} ${midY - 26}, ${midX + bow} ${midY + 26}, ${to.x} ${to.y}`;
 }
 
 function nodeStateOf(agent: AgentDTO | undefined): NodeState {
@@ -137,6 +157,46 @@ function useTypewriter(text: string, enabled: boolean) {
   }, [text, enabled]);
   // once the animation is done (or disabled) always show the full text
   return enabled && shown.length < text.length ? shown : text;
+}
+
+/** the core's eyes track the cursor — the orchestrator is watching you */
+function useEyeTrack(ref: React.RefObject<HTMLElement | null>, enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) return;
+    const el = ref.current;
+    if (!el) return;
+    const face = el.querySelector<HTMLElement>(".oc3-eyes");
+    if (!face) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    let raf = 0;
+    let tx = 0;
+    let ty = 0;
+    let cx = 0;
+    let cy = 0;
+    const step = () => {
+      cx += (tx - cx) * 0.14;
+      cy += (ty - cy) * 0.14;
+      face.style.setProperty("--ex", cx.toFixed(2) + "px");
+      face.style.setProperty("--ey", cy.toFixed(2) + "px");
+      if (Math.abs(tx - cx) > 0.04 || Math.abs(ty - cy) > 0.04) raf = requestAnimationFrame(step);
+      else raf = 0;
+    };
+    const onMove = (e: MouseEvent) => {
+      const r = el.getBoundingClientRect();
+      const dx = e.clientX - (r.left + r.width / 2);
+      const dy = e.clientY - (r.top + r.height * 0.42);
+      const d = Math.hypot(dx, dy) || 1;
+      const m = Math.min(1, d / 260);
+      tx = (dx / d) * 2.8 * m;
+      ty = (dy / d) * 2 * m;
+      if (!raf) raf = requestAnimationFrame(step);
+    };
+    window.addEventListener("mousemove", onMove, { passive: true });
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [ref, enabled]);
 }
 
 /** one worker drone: real label from the fan-out event, real state */
@@ -223,6 +283,19 @@ export function PipelineCanvas({
 
   const coreState: NodeState = runStatus === "done" ? "done" : runStatus === "failed" ? "failed" : "working";
 
+  /* the stage scale: design-space 1000×660 → container width */
+  const stageRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? W;
+      el.style.setProperty("--oc3-s", String(Math.min(1.15, w / W)));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   /* worker drone chips — the rAF orbit ticker rides below */
   const chipRefs = useRef<(HTMLDivElement | null)[]>([]);
   useEffect(() => {
@@ -261,209 +334,215 @@ export function PipelineCanvas({
   return (
     <div className="relative w-full overflow-hidden rounded-[16px] border border-edge bg-well">
       {/* ————————————— the stage ————————————— */}
-      <div className="oc-stage relative" style={{ aspectRatio: `${W} / ${H}`, containerType: "inline-size" }}>
-        {/* deep-space backdrop: nebula, three parallax star sheets, meteors */}
-        <div aria-hidden className="oc-nebula" />
-        <div aria-hidden className="oc-stars oc-stars-b" />
-        <div aria-hidden className="oc-stars oc-stars-a" />
-        <div aria-hidden className="oc-stars oc-stars-c" />
-        <span aria-hidden className="oc-shoot oc-shoot-a" />
-        <span aria-hidden className="oc-shoot oc-shoot-b" />
-        {/* perspective grid floor + stage light */}
-        <div aria-hidden className="oc-horizon" />
-        <div aria-hidden className="oc-floor" />
-        {anyRunning ? <div aria-hidden className="oc-scan" /> : null}
-        <div aria-hidden className="oc-vignette" />
+      <div ref={stageRef} className="oc3-stage relative" style={{ aspectRatio: `${W} / ${H}` }}>
+        {/* design space: authored at 1000×660, scaled to the container */}
+        <div
+          className="absolute left-0 top-0"
+          style={{ width: W, height: H, transform: "scale(var(--oc3-s, 1))", transformOrigin: "0 0" }}
+        >
+          {/* deep-space backdrop: nebula, three parallax star sheets, meteors */}
+          <div aria-hidden className="oc3-nebula" />
+          <div aria-hidden className="oc3-stars oc3-stars-b" />
+          <div aria-hidden className="oc3-stars oc3-stars-a" />
+          <div aria-hidden className="oc3-stars oc3-stars-c" />
+          <span aria-hidden className="oc3-shoot oc3-shoot-a" />
+          <span aria-hidden className="oc3-shoot oc3-shoot-b" />
+          {/* perspective grid floor + stage light */}
+          <div aria-hidden className="oc3-horizon" />
+          <div aria-hidden className="oc3-floor" />
+          {anyRunning ? <div aria-hidden className="oc3-scan" /> : null}
+          <div aria-hidden className="oc3-vignette" />
 
-        {/* HUD chrome */}
-        <div aria-hidden className="oc-hud oc-hud-tl">
-          <span>orchestration deck</span>
-          {anyRunning ? <span className="live-dot h-1 w-1 text-brand" /> : null}
-        </div>
-        <div aria-hidden className={cn("oc-hud oc-hud-tr oc-hud-chip", hudChip.cls)}>
-          {hudChip.label}
-        </div>
-        <span aria-hidden className="oc-corner oc-c-tl" />
-        <span aria-hidden className="oc-corner oc-c-tr" />
-        <span aria-hidden className="oc-corner oc-c-bl" />
-        <span aria-hidden className="oc-corner oc-c-br" />
+          {/* HUD chrome */}
+          <div aria-hidden className="oc3-hud oc3-hud-tl">
+            <span>orchestration deck</span>
+            {anyRunning ? <span className="live-dot h-1 w-1 text-brand" /> : null}
+          </div>
+          <div aria-hidden className={cn("oc3-hud oc3-hud-tr oc3-hud-chip", hudChip.cls)}>
+            {hudChip.label}
+          </div>
+          <span aria-hidden className="oc3-corner oc3-c-tl" />
+          <span aria-hidden className="oc3-corner oc3-c-tr" />
+          <span aria-hidden className="oc3-corner oc3-c-bl" />
+          <span aria-hidden className="oc3-corner oc3-c-br" />
 
-        {/* connector underlay — same box as the node layer, so SVG coordinates
-            map 1:1 onto the pod centers */}
-        <svg viewBox={`0 0 ${W} ${H}`} className="absolute inset-0 h-full w-full" aria-hidden preserveAspectRatio="xMidYMid meet">
-          <defs>
-            <linearGradient id="oc-edge" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#7c7aff" stopOpacity="0.7" />
-              <stop offset="100%" stopColor="#38d9f0" stopOpacity="0.7" />
-            </linearGradient>
-            <marker id="oc-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#ff6b5a" />
-            </marker>
-          </defs>
+          {/* connector underlay — same 1000×660 box as the bots, 1:1 coords */}
+          <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} className="absolute left-0 top-0" aria-hidden>
+            <defs>
+              <linearGradient id="oc3-edge" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="#7c7aff" stopOpacity="0.7" />
+                <stop offset="100%" stopColor="#38d9f0" stopOpacity="0.7" />
+              </linearGradient>
+              <marker id="oc3-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#ff6b5a" />
+              </marker>
+            </defs>
 
-          {/* spawn links — from the core's plate down to every bot */}
-          {Object.entries(NODES).map(([key, n], i) => {
-            const state = nodeStateOfAgentOrEvents(byAgent.get(key), latestLine.has(key));
-            const lit = state === "working" || state === "done";
-            const d = curve(SPAWN_FROM, { x: n.x, y: n.y - 36 });
-            return (
-              <g key={"spawn-" + key}>
+            {/* spawn links — from the core down to every robot */}
+            {Object.entries(NODES).map(([key, n], i) => {
+              const state = nodeStateOfAgentOrEvents(byAgent.get(key), latestLine.has(key));
+              const lit = state === "working" || state === "done";
+              const from = key === "code" || key === "test" ? SPAWN_UNDER : SPAWN_POD;
+              const d = curve(from, { x: n.x, y: n.y - 44 });
+              return (
+                <g key={"spawn-" + key}>
+                  <path
+                    d={d}
+                    fill="none"
+                    strokeWidth={1.4}
+                    pathLength={lit ? undefined : 1}
+                    strokeDasharray={state === "working" ? "5 7" : undefined}
+                    className={cn(
+                      "transition-[stroke,opacity] duration-700",
+                      state === "failed" ? "stroke-bad" : lit ? "stroke-brand" : "stroke-[rgba(148,150,220,0.30)]",
+                      !lit && "oc3-draw",
+                    )}
+                    style={vars({
+                      ...(lit ? { opacity: 0.85 } : { "--d": `${560 + i * 70}ms` }),
+                      ...(state === "working" ? { animation: "oc3-dash 1.1s linear infinite" } : {}),
+                    })}
+                  />
+                  {/* data comets flow INTO the working node */}
+                  {state === "working" ? (
+                    <>
+                      <circle r={5} fill="#7c7aff" opacity={0.22}>
+                        <animateMotion dur="1.6s" repeatCount="indefinite" path={d} />
+                      </circle>
+                      <circle r={2.6} fill="#a3a1ff">
+                        <animateMotion dur="1.6s" repeatCount="indefinite" path={d} />
+                      </circle>
+                      <circle r={2} fill="#38d9f0" opacity={0.85}>
+                        <animateMotion dur="2.1s" begin="0.6s" repeatCount="indefinite" path={d} />
+                      </circle>
+                    </>
+                  ) : null}
+                  {state === "done" ? (
+                    <path d={d} pathLength={1} fill="none" stroke="#35d39a" strokeWidth={1.8} opacity={0.55} className="oc3-draw-done" />
+                  ) : null}
+                </g>
+              );
+            })}
+
+            {/* the flow chain between consecutive agents */}
+            {CHAIN.map(([a, b], i) => {
+              const na = NODES[a];
+              const nb = NODES[b];
+              const sa = nodeStateOfAgentOrEvents(byAgent.get(a), latestLine.has(a));
+              const sb = nodeStateOfAgentOrEvents(byAgent.get(b), latestLine.has(b));
+              const from = { x: na.x + (nb.x >= na.x ? 34 : -34), y: na.y + 6 };
+              const to = { x: nb.x + (nb.x >= na.x ? -34 : 34), y: nb.y - 16 };
+              const lit = sa === "done" && (sb === "working" || sb === "done");
+              return (
                 <path
-                  d={d}
+                  key={"chain-" + a + b}
+                  d={curve(from, to)}
                   fill="none"
                   strokeWidth={1.3}
+                  strokeDasharray="2 6"
+                  stroke={lit ? "url(#oc3-edge)" : "rgba(148,150,220,0.22)"}
+                  className={cn("transition-opacity duration-500", lit ? "opacity-80" : "opacity-70")}
+                  style={vars(lit ? {} : { "--d": `${700 + i * 70}ms` })}
                   pathLength={lit ? undefined : 1}
-                  strokeDasharray={state === "working" ? "5 7" : undefined}
-                  className={cn(
-                    "transition-[stroke,opacity] duration-700",
-                    state === "failed" ? "stroke-bad" : lit ? "stroke-brand" : "stroke-[rgba(148,150,220,0.30)]",
-                    !lit && "oc-draw",
-                  )}
-                  style={vars({
-                    ...(lit ? { opacity: 0.8 } : { "--d": `${560 + i * 70}ms` }),
-                    ...(state === "working" ? { animation: "oc-dash 1.1s linear infinite" } : {}),
-                  })}
                 />
-                {/* data comets flow INTO the working node */}
-                {state === "working" ? (
-                  <>
-                    <circle r={5} fill="#7c7aff" opacity={0.22}>
-                      <animateMotion dur="1.6s" repeatCount="indefinite" path={d} />
-                    </circle>
-                    <circle r={2.6} fill="#a3a1ff">
-                      <animateMotion dur="1.6s" repeatCount="indefinite" path={d} />
-                    </circle>
-                    <circle r={2} fill="#38d9f0" opacity={0.85}>
-                      <animateMotion dur="2.1s" begin="0.6s" repeatCount="indefinite" path={d} />
-                    </circle>
-                  </>
-                ) : null}
-                {state === "done" ? (
-                  <path d={d} pathLength={1} fill="none" stroke="#35d39a" strokeWidth={1.8} opacity={0.55} className="oc-draw-done" />
-                ) : null}
-              </g>
-            );
-          })}
+              );
+            })}
 
-          {/* the flow chain between consecutive agents */}
-          {CHAIN.map(([a, b], i) => {
-            const na = NODES[a];
-            const nb = NODES[b];
-            const sa = nodeStateOfAgentOrEvents(byAgent.get(a), latestLine.has(a));
-            const sb = nodeStateOfAgentOrEvents(byAgent.get(b), latestLine.has(b));
-            const from = { x: na.x + (nb.x >= na.x ? 30 : -30), y: na.y + 10 };
-            const to = { x: nb.x + (nb.x >= na.x ? -30 : 30), y: nb.y - 12 };
-            const lit = sa === "done" && (sb === "working" || sb === "done");
-            return (
+            {/* the quality loop — a bold dashed red arrow from test back to code */}
+            {activeLoop ? (
               <path
-                key={"chain-" + a + b}
-                d={curve(from, to)}
+                d={curve({ x: NODES.test.x - 104, y: NODES.test.y - 16 }, { x: NODES.code.x - 104, y: NODES.code.y + 34 })}
                 fill="none"
-                strokeWidth={1.2}
-                strokeDasharray="2 6"
-                stroke={lit ? "url(#oc-edge)" : "rgba(148,150,220,0.22)"}
-                className={cn("transition-opacity duration-500", lit ? "opacity-80" : "opacity-70")}
-                style={vars(lit ? {} : { "--d": `${700 + i * 70}ms` })}
-                pathLength={lit ? undefined : 1}
+                stroke="#ff6b5a"
+                strokeWidth={2.4}
+                strokeDasharray="9 7"
+                style={{ animation: "oc3-dash 0.9s linear infinite" }}
+                markerEnd="url(#oc3-arrow)"
+              />
+            ) : null}
+          </svg>
+
+          {/* worker drone orbit — real fan-out, real labels, real depth */}
+          {workers.length > 0 ? (
+            <div className="pointer-events-none absolute" style={{ left: NODES.code.x, top: NODES.code.y - 6 }}>
+              <span aria-hidden className="oc3-orbit-track" />
+              {workers.map((w, i) => {
+                const a = (i / workers.length) * Math.PI * 2;
+                const front = Math.sin(a) > -0.08;
+                return (
+                  <div
+                    key={w.label + i}
+                    ref={(el) => {
+                      chipRefs.current[i] = el;
+                    }}
+                    className="oc3-worker"
+                    style={vars({
+                      transform: `translate(-50%,-50%) translate(${(Math.cos(a) * ORBIT.rx).toFixed(1)}px, ${(Math.sin(a) * ORBIT.ry).toFixed(1)}px) scale(${front ? 1 : 0.8})`,
+                      zIndex: front ? 20 : 4,
+                      opacity: front ? 1 : 0.55,
+                    })}
+                  >
+                    <span
+                      className={cn(
+                        "oc3-worker-chip",
+                        w.state === "done" && "oc3-worker-done",
+                        w.state === "failed" && "oc3-worker-failed",
+                      )}
+                    >
+                      <Bot className="h-3 w-3 shrink-0" />
+                      <span className="max-w-[96px] truncate" title={w.label}>
+                        {w.label}
+                      </span>
+                      {w.state === "working" ? (
+                        <span className="live-dot h-1 w-1 shrink-0 text-info" />
+                      ) : w.state === "done" ? (
+                        <Check className="h-2.5 w-2.5 shrink-0" strokeWidth={3} />
+                      ) : (
+                        <X className="h-2.5 w-2.5 shrink-0" strokeWidth={3} />
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {/* the orchestrator station */}
+          <MainCore
+            state={coreState}
+            status={
+              latestLine.get("orchestrator") ??
+              (runStatus === "done"
+                ? "Run complete — every stage green"
+                : runStatus === "failed"
+                  ? "Run failed — see the report"
+                  : "Initializing orchestrator…")
+            }
+            onClick={() => onSelect("orchestrator")}
+          />
+
+          {/* the six stage robots */}
+          {NODE_ORDER.map((key, i) => {
+            const n = NODES[key];
+            const agent = byAgent.get(key);
+            const state = nodeStateOfAgentOrEvents(agent, latestLine.has(key));
+            const failures = flows.filter((f) => f.status === "fail").length;
+            return (
+              <BotUnit
+                key={key}
+                agentKey={key}
+                x={n.x}
+                y={n.y}
+                icon={n.icon}
+                label={n.label}
+                state={state}
+                line={latestLine.get(key) ?? ""}
+                badge={key === "test" && failures > 0 ? failures + " failing" : undefined}
+                delay={260 + i * 90}
+                onClick={() => onSelect(key)}
               />
             );
           })}
-
-          {/* the quality loop — a bold dashed red arrow from test back to code */}
-          {activeLoop ? (
-            <path
-              d={curve({ x: NODES.test.x - 100, y: NODES.test.y - 14 }, { x: NODES.code.x - 100, y: NODES.code.y + 32 })}
-              fill="none"
-              stroke="#ff6b5a"
-              strokeWidth={2.4}
-              strokeDasharray="9 7"
-              style={{ animation: "oc-dash 0.9s linear infinite" }}
-              markerEnd="url(#oc-arrow)"
-            />
-          ) : null}
-        </svg>
-
-        {/* worker drone orbit — real fan-out, real labels, real depth */}
-        {workers.length > 0 ? (
-          <div className="pointer-events-none absolute" style={{ left: px(NODES.code.x, W), top: px(NODES.code.y - 6, H) }}>
-            <span aria-hidden className="oc-orbit-track" />
-            {workers.map((w, i) => {
-              const a = (i / workers.length) * Math.PI * 2;
-              const front = Math.sin(a) > -0.08;
-              return (
-                <div
-                  key={w.label + i}
-                  ref={(el) => {
-                    chipRefs.current[i] = el;
-                  }}
-                  className="oc-worker"
-                  style={vars({
-                    transform: `translate(-50%,-50%) translate(${(Math.cos(a) * ORBIT.rx).toFixed(1)}px, ${(Math.sin(a) * ORBIT.ry).toFixed(1)}px) scale(${front ? 1 : 0.8})`,
-                    zIndex: front ? 20 : 4,
-                    opacity: front ? 1 : 0.55,
-                  })}
-                >
-                  <span
-                    className={cn(
-                      "oc-worker-chip",
-                      w.state === "done" && "oc-worker-done",
-                      w.state === "failed" && "oc-worker-failed",
-                    )}
-                  >
-                    <Bot className="h-3 w-3 shrink-0" />
-                    <span className="max-w-[96px] truncate" title={w.label}>
-                      {w.label}
-                    </span>
-                    {w.state === "working" ? (
-                      <span className="live-dot h-1 w-1 shrink-0 text-info" />
-                    ) : w.state === "done" ? (
-                      <Check className="h-2.5 w-2.5 shrink-0" strokeWidth={3} />
-                    ) : (
-                      <X className="h-2.5 w-2.5 shrink-0" strokeWidth={3} />
-                    )}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
-
-        {/* the orchestrator core */}
-        <MainCore
-          state={coreState}
-          status={
-            latestLine.get("orchestrator") ??
-            (runStatus === "done"
-              ? "Run complete — every stage green"
-              : runStatus === "failed"
-                ? "Run failed — see the report"
-                : "Initializing orchestrator…")
-          }
-          onClick={() => onSelect("orchestrator")}
-        />
-
-        {/* the six stage bots */}
-        {NODE_ORDER.map((key, i) => {
-          const n = NODES[key];
-          const agent = byAgent.get(key);
-          const state = nodeStateOfAgentOrEvents(agent, latestLine.has(key));
-          const failures = flows.filter((f) => f.status === "fail").length;
-          return (
-            <BotUnit
-              key={key}
-              agentKey={key}
-              x={n.x}
-              y={n.y}
-              icon={n.icon}
-              label={n.label}
-              state={state}
-              line={latestLine.get(key) ?? ""}
-              badge={key === "test" && failures > 0 ? failures + " failing" : undefined}
-              delay={260 + i * 90}
-              onClick={() => onSelect(key)}
-            />
-          );
-        })}
+        </div>
       </div>
 
       {/* ————————————— mission readouts ————————————— */}
@@ -483,48 +562,63 @@ export function PipelineCanvas({
   );
 }
 
-/* ————————————————————————— the orchestrator core ————————————————————————— */
+/* ————————————————————————— the orchestrator station ————————————————————————— */
 
 function MainCore({ state, status, onClick }: { state: NodeState; status: string; onClick: () => void }) {
   const line = useTypewriter(status, state === "working");
+  const ref = useRef<HTMLButtonElement>(null);
+  useEyeTrack(ref, true);
   return (
     <button
       type="button"
+      ref={ref}
       onClick={onClick}
-      className="oc-unit oc-core group"
+      className="oc3-unit oc3-core group"
       data-state={state}
-      style={vars({ left: px(MAIN.x, W), top: px(MAIN.y, H), "--d": "80ms", "--glow": STATE_GLOW[state], "--acc": STATE_ACC[state] })}
+      style={vars({ left: MAIN.x, top: MAIN.y, "--d": "80ms", "--glow": STATE_GLOW[state], "--acc": STATE_ACC[state] })}
       aria-label="Main orchestrator"
     >
-      <span className="oc-lift">
-        <span className="oc-bob" style={vars({ "--bob": "5.2s" })}>
-          <span className="oc-halo" />
-          <span className="oc-ring oc-ring-a" />
-          <span className="oc-ring oc-ring-b" />
-          <span aria-hidden className="oc-orbit-dot oc-orbit-dot-a" />
-          <span aria-hidden className="oc-orbit-dot oc-orbit-dot-b" />
-          <span className="oc-pod oc-core-ball">
-            <span className="oc-sheen" />
-            <span className="oc-visor">
-              <span className={cn("oc-visor-beam", state === "working" && "oc-visor-live")} />
+      <span className="oc3-lift">
+        <span className="oc3-bob" style={vars({ "--bob": "5.6s" })}>
+          <span className="oc3-halo" />
+          <span className="oc3-ring oc3-ring-a" />
+          <span className="oc3-ring oc3-ring-b" />
+          <span aria-hidden className="oc3-orbit-dot oc3-orbit-dot-a" />
+          <span aria-hidden className="oc3-orbit-dot oc3-orbit-dot-b" />
+          {/* the station is a big robot too */}
+          <span className="oc3-bot oc3-bot-core">
+            <span className="oc3-antenna">
+              <span className="oc3-beacon" />
             </span>
-            <Sparkles className="oc-emblem oc-core-icon" />
-            {state === "working" ? <span className="oc-reticle oc-reticle-core" /> : null}
-            {state === "done" ? (
-              <span className="oc-seal oc-seal-core">
-                <Check strokeWidth={3} />
+            <span className="oc3-head">
+              <span className="oc3-face">
+                <span className="oc3-eyes">
+                  <span className="oc3-eye oc3-eye-l" />
+                  <span className="oc3-eye oc3-eye-r" />
+                </span>
               </span>
-            ) : null}
+            </span>
+            <span className="oc3-neck" />
+            <span className="oc3-torso oc3-torso-core">
+              <span className="oc3-chest" />
+            </span>
+            <span className="oc3-skirt" />
           </span>
+          {state === "working" ? <span className="oc3-reticle oc3-reticle-core" /> : null}
+          {state === "done" ? (
+            <span className="oc3-seal oc3-seal-core">
+              <Check strokeWidth={3} />
+            </span>
+          ) : null}
         </span>
       </span>
-      <span className="oc-shadow oc-shadow-core" />
-      <span className="oc-plate oc-core-plate">
-        <span className="oc-plate-head oc-core-head">
-          <span className="oc-plate-name">main agent</span>
+      <span className="oc3-shadow oc3-shadow-core" />
+      <span className="oc3-tag oc3-tag-core">
+        <span className="oc3-tag-head">
+          <span className="oc3-tag-name">main agent</span>
           {state === "working" ? <span className="live-dot h-1 w-1 text-brand" /> : null}
         </span>
-        <span className="oc-plate-line oc-core-line" title={line}>
+        <span className="oc3-tag-line" title={line}>
           {state === "idle" ? "standby" : line}
         </span>
       </span>
@@ -532,7 +626,7 @@ function MainCore({ state, status, onClick }: { state: NodeState; status: string
   );
 }
 
-/* ————————————————————————— a stage bot ————————————————————————— */
+/* ————————————————————————— a stage robot ————————————————————————— */
 
 function BotUnit({
   agentKey,
@@ -558,7 +652,13 @@ function BotUnit({
   onClick: () => void;
 }) {
   const line = useTypewriter(rawLine.replace(/^-> /, "").replace(/^\$ /, ""), state === "working");
-  const bob = (3.8 + ((x * 7 + y * 13) % 14) / 10).toFixed(2) + "s";
+  // deterministic per-robot life: bob period, blink cadence, glance rhythm
+  const seed = (x * 7 + y * 13) % 97;
+  const bob = (3.8 + (seed % 14) / 10).toFixed(2) + "s";
+  const blinkD = (3.4 + (seed % 20) / 10).toFixed(2) + "s";
+  const blinkDelay = ((seed % 30) / 10).toFixed(2) + "s";
+  const lookD = (7 + (seed % 40) / 10).toFixed(2) + "s";
+  const lookDelay = ((seed % 50) / 10).toFixed(2) + "s";
   return (
     <button
       type="button"
@@ -566,49 +666,69 @@ function BotUnit({
       data-node={agentKey}
       data-state={state}
       aria-label={label + " agent"}
-      className="oc-unit oc-bot group"
+      className="oc3-unit oc3-bot-unit group"
       style={vars({
-        left: px(x, W),
-        top: px(y, H),
+        left: x,
+        top: y,
         "--d": `${delay}ms`,
         "--glow": STATE_GLOW[state],
         "--acc": STATE_ACC[state],
+        "--bob": bob,
+        "--blink-d": blinkD,
+        "--blink-delay": blinkDelay,
+        "--look-d": lookD,
+        "--look-delay": lookDelay,
       })}
     >
-      <span className="oc-lift">
-        <span className="oc-bob" style={vars({ "--bob": bob })}>
-          <span className="oc-halo" />
-          <span className="oc-pod">
-            <span className="oc-sheen" />
-            <span className="oc-visor">
-              <span className={cn("oc-visor-beam", state === "working" && "oc-visor-live")} />
+      <span className="oc3-lift">
+        <span className="oc3-bob">
+          <span className="oc3-halo" />
+          {/* the robot */}
+          <span className="oc3-bot">
+            <span className="oc3-antenna">
+              <span className="oc3-beacon" />
             </span>
-            <Icon className="oc-emblem" />
-            {state === "working" ? (
-              <>
-                <span className="oc-reticle" />
-                <span className="oc-pulse" />
-              </>
-            ) : null}
-            {state === "done" ? (
-              <span className="oc-seal">
-                <Check strokeWidth={3} />
+            <span className="oc3-arm oc3-arm-l" />
+            <span className="oc3-arm oc3-arm-r" />
+            <span className="oc3-head">
+              <span className="oc3-ear oc3-ear-l" />
+              <span className="oc3-ear oc3-ear-r" />
+              <span className="oc3-face">
+                <span className="oc3-eyes">
+                  <span className="oc3-eye oc3-eye-l" />
+                  <span className="oc3-eye oc3-eye-r" />
+                </span>
               </span>
-            ) : null}
+            </span>
+            <span className="oc3-neck" />
+            <span className="oc3-torso">
+              <Icon className="oc3-chest-icon" />
+              <span className="oc3-chest" />
+            </span>
+            <span className="oc3-skirt" />
           </span>
-          <span className="oc-antenna">
-            <span className="oc-beacon" />
-          </span>
+          {state === "working" ? (
+            <>
+              <span className="oc3-reticle" />
+              <span className="oc3-pulse" />
+            </>
+          ) : null}
+          {state === "done" ? (
+            <span className="oc3-seal">
+              <Check strokeWidth={3} />
+            </span>
+          ) : null}
+          {state === "failed" ? <span className="oc3-alert">!</span> : null}
         </span>
       </span>
-      <span className="oc-shadow" />
-      <span className="oc-plate">
-        <span className="oc-plate-head">
-          <span className="oc-plate-name">{label}</span>
+      <span className="oc3-shadow" />
+      <span className="oc3-tag">
+        <span className="oc3-tag-head">
+          <span className="oc3-tag-name">{label}</span>
           {state === "working" ? <span className="live-dot h-1 w-1 shrink-0 text-brand" /> : null}
-          {badge ? <span className="oc-plate-badge">{badge}</span> : null}
+          {badge ? <span className="oc3-tag-badge">{badge}</span> : null}
         </span>
-        <span className="oc-plate-line" title={line}>
+        <span className="oc3-tag-line" title={line}>
           {state === "idle" ? "standby" : line}
         </span>
       </span>
@@ -650,12 +770,12 @@ function QualityMeter({
       </div>
       <div className="mt-2 h-[5px] w-full overflow-hidden rounded-full bg-white/[0.06]">
         <div
-          className={cn("relative h-full rounded-full bg-gradient-to-r from-brand via-info to-pass transition-[width] duration-1000 ease-out", aaa && "oc-meter-lock")}
+          className={cn("relative h-full rounded-full bg-gradient-to-r from-brand via-info to-pass transition-[width] duration-1000 ease-out", aaa && "oc3-meter-lock")}
           style={{ width: current + "%" }}
         >
           {history.length > 1 ? (
             <span className="absolute inset-0 overflow-hidden">
-              <span className="oc-sweepbar absolute inset-0" />
+              <span className="oc3-sweepbar absolute inset-0" />
             </span>
           ) : null}
         </div>

@@ -70,8 +70,8 @@ export function ActivityLog({
   }
 
   return (
-    <div className="overflow-hidden rounded-[14px] border border-edge bg-well">
-      <div className="flex items-center justify-between gap-3 border-b border-edge px-3.5 py-2.5">
+    <div className="overflow-hidden rounded-[14px] border border-edge bg-[linear-gradient(180deg,rgba(14,16,28,0.6),rgba(5,6,10,0.9))] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]">
+      <div className="flex items-center justify-between gap-3 border-b border-edge bg-white/[0.02] px-3.5 py-2.5">
         <div className="flex items-center gap-2.5">
           <span className="flex gap-1">
             <span className="h-2 w-2 rounded-full bg-bad/50" />

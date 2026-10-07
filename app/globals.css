@@ -287,12 +287,13 @@ body {
 }
 
 /* ==========================================================================
-   APPLICATION SURFACE — the dashboard's own design system.
+/* ==========================================================================
+   APPLICATION SURFACE — the dashboard's own design system. v3 "observatory".
 
    Scoped deliberately: these tokens are additive, so the marketing page keeps
-   its own palette untouched. Where the landing page is atmospheric (glows,
-   smoke, big type), the app is an instrument: flat tonal surfaces, hairline
-   edges, tabular numerals, colour reserved for state.
+   its own palette untouched. The look: deep space-lab surfaces with a subtle
+   top light, hairline edges that catch the accent on hover, glass rails, and
+   colour reserved strictly for state.
 
    Semantic colour carries meaning and nothing else:
      brand  — the pipeline itself, and anything interactive
@@ -302,16 +303,16 @@ body {
    ========================================================================== */
 
 :root {
-  --app-ink: #0a0b0f;
-  --app-well: #07080b;
-  --app-surface: #101217;
-  --app-surface2: #161922;
-  --app-surface3: #1e222c;
+  --app-ink: #08090d;
+  --app-well: #05060a;
+  --app-surface: #0e1016;
+  --app-surface2: #14161f;
+  --app-surface3: #1b1e2b;
   --app-edge: rgba(255, 255, 255, 0.07);
-  --app-edge2: rgba(255, 255, 255, 0.13);
-  --app-t1: #edeef2;
-  --app-t2: rgba(237, 238, 242, 0.62);
-  --app-t3: rgba(237, 238, 242, 0.36);
+  --app-edge2: rgba(255, 255, 255, 0.14);
+  --app-t1: #eef0f6;
+  --app-t2: rgba(238, 240, 246, 0.62);
+  --app-t3: rgba(238, 240, 246, 0.38);
   --app-brand: #7c7aff;
   --app-brand2: #5b59e8;
   --app-pass: #35d39a;
@@ -349,32 +350,41 @@ body {
    element can always override it (e.g. className="eyebrow text-warn"). */
 @layer components {
 
-/* One border, one inset highlight, one shadow. Depth comes from the tonal
-   step between --app-ink and --app-surface, not from a glow. */
+/* The signature surface: a soft top light like a lamp over a console,
+   one hairline edge, one deep shadow. Depth without noise. */
 .panel {
-  background: var(--app-surface);
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.0) 120px),
+    var(--app-surface);
   border: 1px solid var(--app-edge);
   box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.035),
-    0 1px 2px 0 rgba(0, 0, 0, 0.4);
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
+    0 1px 2px 0 rgba(0, 0, 0, 0.5),
+    0 24px 60px -36px rgba(0, 0, 0, 0.9);
 }
 .panel-2 {
-  background: var(--app-surface2);
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.0) 120px),
+    var(--app-surface2);
   border: 1px solid var(--app-edge);
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.055);
 }
 .well {
-  background: var(--app-well);
+  background:
+    radial-gradient(120% 90% at 50% -10%, rgba(124, 122, 255, 0.05), transparent 55%),
+    var(--app-well);
   border: 1px solid var(--app-edge);
-  box-shadow: inset 0 1px 0 0 rgba(0, 0, 0, 0.5);
+  box-shadow: inset 0 1px 0 0 rgba(0, 0, 0, 0.6), inset 0 10px 30px -18px rgba(0, 0, 0, 0.8);
 }
 
-/* Interactive surfaces lift by a hairline, never by jumping scale. */
+/* Interactive surfaces lift by a hairline and catch the accent light. */
 .lift {
   transition:
     background-color 0.18s ease,
     border-color 0.18s ease,
-    box-shadow 0.18s ease,
+    box-shadow 0.22s ease,
     transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .lift:hover {
@@ -517,44 +527,44 @@ body {
 }
 
 /* ==========================================================================
-   ORCHESTRATION CANVAS — cinematic 3D mission deck.
-   A perspective stage in deep space: gyroscope core, floating dome bots with
-   visors and grounding shadows, worker drones on a depth-correct orbit,
-   parallax starfield, perspective grid floor, meteors, radar sweep.
+   ORCHESTRATION CANVAS — cinematic 3D robot deck. v3.
+   The stage is authored in a fixed 1000×660 design space, scaled to the
+   container with one transform (--oc3-s). The agents are robots with faces:
+   glass dome head, two glowing eyes (blink + glance), neck, torso with a
+   chest light, hovering on a flickering thruster. Livingness is layered
+   micro-motion — nothing teleports, everything breathes.
    Transform/opacity/filter only; everything collapses under reduced motion.
    ========================================================================== */
 
 /* ————— the stage ————— */
 
-.oc-stage {
-  perspective: 1200px;
-  perspective-origin: 50% 26%;
-  background: linear-gradient(180deg, #0d0f24 0%, #0a0b1a 44%, #06070f 100%);
+.oc3-stage {
+  background: linear-gradient(180deg, #0c0e22 0%, #090a18 44%, #05060e 100%);
 }
 
-.oc-nebula {
+.oc3-nebula {
   position: absolute;
   inset: -22%;
   pointer-events: none;
   background:
-    radial-gradient(40% 30% at 50% 14%, rgba(124, 122, 255, 0.2), transparent 70%),
-    radial-gradient(26% 22% at 18% 58%, rgba(56, 217, 240, 0.1), transparent 70%),
-    radial-gradient(26% 22% at 82% 55%, rgba(53, 211, 154, 0.08), transparent 70%),
-    radial-gradient(34% 26% at 50% 88%, rgba(124, 122, 255, 0.1), transparent 72%);
-  animation: oc-nebula 14s ease-in-out infinite alternate;
+    radial-gradient(40% 30% at 50% 14%, rgba(124, 122, 255, 0.22), transparent 70%),
+    radial-gradient(26% 22% at 18% 58%, rgba(56, 217, 240, 0.11), transparent 70%),
+    radial-gradient(26% 22% at 82% 55%, rgba(53, 211, 154, 0.09), transparent 70%),
+    radial-gradient(34% 26% at 50% 88%, rgba(124, 122, 255, 0.11), transparent 72%);
+  animation: oc3-nebula 14s ease-in-out infinite alternate;
 }
-@keyframes oc-nebula {
+@keyframes oc3-nebula {
   from { transform: translate3d(-1.2%, -0.8%, 0) scale(1); opacity: 0.85; }
   to { transform: translate3d(1.2%, 1.2%, 0) scale(1.05); opacity: 1; }
 }
 
 /* three parallax star sheets at different depths */
-.oc-stars {
+.oc3-stars {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
-.oc-stars-a {
+.oc3-stars-a {
   opacity: 0.9;
   background-image:
     radial-gradient(1.3px 1.3px at 11% 22%, rgba(255, 255, 255, 0.6), transparent 60%),
@@ -565,9 +575,9 @@ body {
     radial-gradient(1px 1px at 21% 84%, rgba(255, 255, 255, 0.4), transparent 60%),
     radial-gradient(1.4px 1.4px at 45% 38%, rgba(255, 255, 255, 0.55), transparent 60%),
     radial-gradient(1px 1px at 67% 88%, rgba(124, 122, 255, 0.5), transparent 60%);
-  animation: oc-drift 30s linear infinite;
+  animation: oc3-drift 30s linear infinite;
 }
-.oc-stars-b {
+.oc3-stars-b {
   opacity: 0.6;
   background-image:
     radial-gradient(1px 1px at 8% 60%, rgba(255, 255, 255, 0.35), transparent 60%),
@@ -576,9 +586,9 @@ body {
     radial-gradient(1px 1px at 72% 32%, rgba(255, 255, 255, 0.28), transparent 60%),
     radial-gradient(1.1px 1.1px at 94% 14%, rgba(255, 255, 255, 0.3), transparent 60%),
     radial-gradient(1px 1px at 60% 92%, rgba(56, 217, 240, 0.3), transparent 60%);
-  animation: oc-drift 46s linear infinite reverse;
+  animation: oc3-drift 46s linear infinite reverse;
 }
-.oc-stars-c {
+.oc3-stars-c {
   opacity: 0.4;
   background-image:
     radial-gradient(1px 1px at 16% 40%, rgba(255, 255, 255, 0.5), transparent 60%),
@@ -586,14 +596,14 @@ body {
     radial-gradient(1px 1px at 66% 58%, rgba(255, 255, 255, 0.45), transparent 60%),
     radial-gradient(1px 1px at 84% 88%, rgba(255, 255, 255, 0.4), transparent 60%),
     radial-gradient(1px 1px at 5% 76%, rgba(124, 122, 255, 0.4), transparent 60%);
-  animation: oc-drift 70s linear infinite;
+  animation: oc3-drift 70s linear infinite;
 }
-@keyframes oc-drift {
+@keyframes oc3-drift {
   to { transform: translate3d(-18px, -26px, 0); }
 }
 
 /* occasional meteors streaking through the field */
-.oc-shoot {
+.oc3-shoot {
   position: absolute;
   width: 120px;
   height: 1px;
@@ -601,26 +611,26 @@ body {
   opacity: 0;
   background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.85), rgba(124, 122, 255, 0));
 }
-.oc-shoot-a {
+.oc3-shoot-a {
   top: 16%;
   left: 10%;
   --tilt: -26deg;
-  animation: oc-meteor 12s linear infinite 3s;
+  animation: oc3-meteor 12s linear infinite 3s;
 }
-.oc-shoot-b {
+.oc3-shoot-b {
   top: 9%;
   left: 55%;
   --tilt: -22deg;
-  animation: oc-meteor 15s linear infinite 9s;
+  animation: oc3-meteor 15s linear infinite 9s;
 }
-@keyframes oc-meteor {
+@keyframes oc3-meteor {
   0%, 82% { opacity: 0; transform: rotate(var(--tilt, -26deg)) translateX(0); }
   85% { opacity: 0.8; }
   94%, 100% { opacity: 0; transform: rotate(var(--tilt, -26deg)) translateX(620px); }
 }
 
 /* perspective grid floor — the "ground plane" that sells the 3D stage */
-.oc-floor {
+.oc3-floor {
   position: absolute;
   left: -14%;
   right: -14%;
@@ -634,32 +644,32 @@ body {
   transform-origin: 50% 100%;
   -webkit-mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.95) 22%, transparent 88%);
   mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.95) 22%, transparent 88%);
-  animation: oc-floor 7s linear infinite;
+  animation: oc3-floor 7s linear infinite;
 }
-@keyframes oc-floor {
+@keyframes oc3-floor {
   from { background-position: 0 0; }
   to { background-position: 0 36px; }
 }
 
-/* stage light rising from the horizon behind the bots */
-.oc-horizon {
+/* stage light rising from the horizon behind the robots */
+.oc3-horizon {
   position: absolute;
   inset-inline: 0;
   bottom: 26%;
   height: 36%;
   pointer-events: none;
-  background: radial-gradient(48% 100% at 50% 100%, rgba(124, 122, 255, 0.12), transparent 72%);
+  background: radial-gradient(48% 100% at 50% 100%, rgba(124, 122, 255, 0.13), transparent 72%);
 }
 
 /* radar sweep while anything runs */
-.oc-scan {
+.oc3-scan {
   position: absolute;
   inset: 0;
   pointer-events: none;
   overflow: hidden;
   z-index: 1;
 }
-.oc-scan::after {
+.oc3-scan::after {
   content: "";
   position: absolute;
   top: -10%;
@@ -667,14 +677,14 @@ body {
   left: -24%;
   width: 16%;
   background: linear-gradient(100deg, transparent, rgba(124, 122, 255, 0.06) 42%, rgba(124, 122, 255, 0.13) 50%, rgba(124, 122, 255, 0.06) 58%, transparent);
-  animation: oc-sweep 6.5s cubic-bezier(0.45, 0, 0.2, 1) infinite;
+  animation: oc3-sweep 6.5s cubic-bezier(0.45, 0, 0.2, 1) infinite;
 }
-@keyframes oc-sweep {
+@keyframes oc3-sweep {
   from { transform: translateX(0) skewX(-8deg); }
   to { transform: translateX(820%) skewX(-8deg); }
 }
 
-.oc-vignette {
+.oc3-vignette {
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -684,7 +694,7 @@ body {
 
 /* ————— HUD chrome ————— */
 
-.oc-hud {
+.oc3-hud {
   position: absolute;
   z-index: 5;
   display: flex;
@@ -697,9 +707,9 @@ body {
   color: rgba(186, 190, 236, 0.8);
   pointer-events: none;
 }
-.oc-hud-tl { top: 13px; left: 42px; }
-.oc-hud-tr { top: 10px; right: 42px; }
-.oc-hud-chip {
+.oc3-hud-tl { top: 13px; left: 42px; }
+.oc3-hud-tr { top: 10px; right: 42px; }
+.oc3-hud-chip {
   border-width: 1px;
   border-style: solid;
   border-radius: 999px;
@@ -709,243 +719,369 @@ body {
   letter-spacing: 0.2em;
 }
 
-.oc-corner {
+.oc3-corner {
   position: absolute;
   width: 22px;
   height: 22px;
   pointer-events: none;
   opacity: 0.55;
 }
-.oc-c-tl { top: 8px; left: 8px; border-top: 1px solid rgba(148, 150, 220, 0.6); border-left: 1px solid rgba(148, 150, 220, 0.6); }
-.oc-c-tr { top: 8px; right: 8px; border-top: 1px solid rgba(148, 150, 220, 0.6); border-right: 1px solid rgba(148, 150, 220, 0.6); }
-.oc-c-bl { bottom: 8px; left: 8px; border-bottom: 1px solid rgba(148, 150, 220, 0.6); border-left: 1px solid rgba(148, 150, 220, 0.6); }
-.oc-c-br { bottom: 8px; right: 8px; border-bottom: 1px solid rgba(148, 150, 220, 0.6); border-right: 1px solid rgba(148, 150, 220, 0.6); }
+.oc3-c-tl { top: 8px; left: 8px; border-top: 1px solid rgba(148, 150, 220, 0.6); border-left: 1px solid rgba(148, 150, 220, 0.6); }
+.oc3-c-tr { top: 8px; right: 8px; border-top: 1px solid rgba(148, 150, 220, 0.6); border-right: 1px solid rgba(148, 150, 220, 0.6); }
+.oc3-c-bl { bottom: 8px; left: 8px; border-bottom: 1px solid rgba(148, 150, 220, 0.6); border-left: 1px solid rgba(148, 150, 220, 0.6); }
+.oc3-c-br { bottom: 8px; right: 8px; border-bottom: 1px solid rgba(148, 150, 220, 0.6); border-right: 1px solid rgba(148, 150, 220, 0.6); }
 
 /* ————— SVG connectors ————— */
 
 /* entrance draw-in for the static base paths */
-.oc-draw {
+.oc3-draw {
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
-  animation: oc-draw 0.9s ease-out both;
+  animation: oc3-draw 0.9s ease-out both;
   animation-delay: var(--d, 0ms);
 }
-@keyframes oc-draw {
+@keyframes oc3-draw {
   to { stroke-dashoffset: 0; }
 }
 /* the green seal flash along a finished connector */
-.oc-draw-done {
+.oc3-draw-done {
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
-  animation: oc-draw 0.7s ease-out 0.15s both;
+  animation: oc3-draw 0.7s ease-out 0.15s both;
 }
 /* marching dashes for active links */
-@keyframes oc-dash {
+@keyframes oc3-dash {
   to { stroke-dashoffset: -24; }
 }
 
-/* ————— units: the bots ————— */
+/* ————— units: the robots ————— */
 
-.oc-unit {
+.oc3-unit {
   position: absolute;
   z-index: 10;
   width: 0;
   height: 0;
   transform: translate(-50%, -50%);
   cursor: pointer;
-  animation: oc-boot 0.85s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: oc3-boot 0.85s cubic-bezier(0.16, 1, 0.3, 1) both;
   animation-delay: var(--d, 0ms);
 }
-.oc-core { z-index: 12; animation-duration: 1s; }
-.oc-unit:hover { z-index: 45; }
-.oc-unit:focus-visible { outline: none; }
-.oc-unit:focus-visible .oc-pod {
+.oc3-core { z-index: 12; animation-duration: 1s; }
+.oc3-unit:hover { z-index: 45; }
+.oc3-unit:focus-visible { outline: none; }
+.oc3-unit:focus-visible .oc3-head {
   outline: 2px solid var(--acc);
   outline-offset: 3px;
 }
-@keyframes oc-boot {
+@keyframes oc3-boot {
   0% { opacity: 0; transform: translate(-50%, -30%) translateZ(-220px) rotateX(30deg) scale(0.62); filter: blur(8px); }
   100% { opacity: 1; transform: translate(-50%, -50%) translateZ(0) rotateX(0deg) scale(1); filter: blur(0); }
 }
 
-.oc-lift {
+.oc3-lift {
   position: absolute;
   left: 0;
   top: 0;
   transform-style: preserve-3d;
   transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.oc-unit:hover .oc-lift,
-.oc-unit:focus-visible .oc-lift {
-  transform: translateY(-5px) translateZ(26px);
-}
-.oc-unit[data-state="failed"] .oc-lift {
-  animation: oc-shake 0.34s ease-in-out 3;
-}
-@keyframes oc-shake {
-  0%, 100% { transform: translateX(0); }
-  25% { transform: translateX(-2.5px); }
-  75% { transform: translateX(2.5px); }
+.oc3-unit:hover .oc3-lift,
+.oc3-unit:focus-visible .oc3-lift {
+  transform: translateY(-6px) scale(1.04);
 }
 
-.oc-bob {
+.oc3-bob {
   position: absolute;
   left: 0;
   top: 0;
   transform-style: preserve-3d;
-  animation: oc-bob var(--bob, 4.6s) ease-in-out infinite;
+  animation: oc3-bob var(--bob, 4.6s) ease-in-out infinite;
 }
-@keyframes oc-bob {
+@keyframes oc3-bob {
   0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-4.5px); }
+  50% { transform: translateY(-5px); }
 }
 
-/* state halo behind the pod — opacity-only pulse */
-.oc-halo {
+/* state halo behind the robot — opacity-only pulse */
+.oc3-halo {
   position: absolute;
-  left: -46px;
-  top: -46px;
-  width: 92px;
-  height: 92px;
+  left: -50px;
+  top: -50px;
+  width: 100px;
+  height: 100px;
   border-radius: 999px;
   pointer-events: none;
   background: radial-gradient(circle, var(--glow), transparent 66%);
-  animation: oc-breathe 3.4s ease-in-out infinite;
+  animation: oc3-breathe 3.4s ease-in-out infinite;
 }
-.oc-unit[data-state="idle"] .oc-halo { animation: none; opacity: 0.3; }
-@keyframes oc-breathe {
+.oc3-unit[data-state="idle"] .oc3-halo { animation: none; opacity: 0.3; }
+@keyframes oc3-breathe {
   0%, 100% { opacity: 0.35; transform: scale(0.94); }
-  50% { opacity: 0.75; transform: scale(1.06); }
+  50% { opacity: 0.78; transform: scale(1.06); }
 }
 
-/* the pod — a layered dome that reads as a lit 3D shell */
-.oc-pod {
-  position: absolute;
-  left: -29px;
-  top: -29px;
-  width: 58px;
-  height: 58px;
-  border-radius: 44%;
-  background:
-    radial-gradient(circle at 31% 22%, rgba(255, 255, 255, 0.34), transparent 42%),
-    radial-gradient(circle at 72% 88%, rgba(4, 5, 14, 0.9), transparent 52%),
-    linear-gradient(155deg, #383b68 0%, #1c1e3e 46%, #0b0c1c 100%);
-  border: 1px solid var(--acc);
-  box-shadow:
-    inset 0 2px 5px rgba(255, 255, 255, 0.16),
-    inset 0 -9px 16px rgba(0, 0, 0, 0.6),
-    0 16px 30px -12px rgba(0, 0, 0, 0.9),
-    0 0 30px -4px var(--glow);
-  transform: rotateX(9deg);
-  transform-style: preserve-3d;
-  transition: border-color 0.4s, box-shadow 0.4s;
-}
-.oc-bot[data-state="idle"] .oc-pod { filter: saturate(0.55) brightness(0.82); }
+/* ————— robot anatomy ————— */
 
-.oc-sheen {
+.oc3-bot {
   position: absolute;
-  left: 16%;
-  top: 10%;
-  width: 34%;
-  height: 20%;
-  border-radius: 999px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0));
-  filter: blur(1px);
-  transform: rotate(-24deg);
-}
-
-/* the visor — a lit slit; a beam patrols it while the agent works */
-.oc-visor {
-  position: absolute;
-  left: 15%;
-  right: 15%;
-  top: 33%;
-  height: 18%;
-  border-radius: 999px;
-  background: linear-gradient(180deg, #04050d, #0d1130 78%);
-  box-shadow:
-    inset 0 1.5px 4px rgba(0, 0, 0, 0.95),
-    inset 0 -1px 2px rgba(255, 255, 255, 0.06),
-    0 0 12px -2px var(--glow);
-  overflow: hidden;
-}
-.oc-visor-beam {
-  position: absolute;
-  top: 0;
-  bottom: 0;
   left: 0;
-  width: 34%;
-  border-radius: 999px;
-  opacity: 0.3;
-  background: linear-gradient(90deg, transparent, var(--acc), transparent);
-}
-.oc-visor-live {
-  opacity: 0.95;
-  animation: oc-patrol 2.4s ease-in-out infinite;
-}
-@keyframes oc-patrol {
-  0% { transform: translateX(-110%); }
-  100% { transform: translateX(400%); }
+  top: 0;
+  width: 0;
+  height: 0;
 }
 
-/* chest emblem */
-.oc-emblem {
+/* the head: glass dome over a dark face */
+.oc3-head {
   position: absolute;
   left: 50%;
-  top: 63%;
+  top: -30px;
+  width: 40px;
+  height: 34px;
+  transform: translateX(-50%);
+  border-radius: 18px 18px 14px 14px;
+  background:
+    radial-gradient(circle at 30% 18%, rgba(255, 255, 255, 0.4), transparent 46%),
+    radial-gradient(circle at 74% 90%, rgba(3, 4, 12, 0.9), transparent 55%),
+    linear-gradient(165deg, #4a4e86 0%, #23264c 52%, #0d0e22 100%);
+  border: 1px solid var(--acc);
+  box-shadow:
+    inset 0 2px 4px rgba(255, 255, 255, 0.2),
+    inset 0 -6px 12px rgba(0, 0, 0, 0.6),
+    0 8px 18px -8px rgba(0, 0, 0, 0.9),
+    0 0 18px -4px var(--glow);
+  animation: oc3-tilt var(--look-d, 8s) ease-in-out infinite;
+}
+@keyframes oc3-tilt {
+  0%, 100% { transform: translateX(-50%) rotate(0deg); }
+  30% { transform: translateX(-50%) rotate(1.6deg); }
+  62% { transform: translateX(-50%) rotate(-1.8deg); }
+}
+
+/* the dark face panel the eyes live on */
+.oc3-face {
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  top: 8px;
+  height: 18px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #02030a, #0a0d26 82%);
+  box-shadow:
+    inset 0 2px 5px rgba(0, 0, 0, 0.95),
+    inset 0 -1px 2px rgba(255, 255, 255, 0.05),
+    0 0 10px -2px var(--glow);
+  overflow: hidden;
+}
+
+/* the eyes — one element each, blink by scaleY, glance via --ex/--ey */
+.oc3-eyes {
+  position: absolute;
+  inset: 0;
+  transform: translate(var(--ex, 0px), var(--ey, 0px));
+  transition: transform 0.12s ease-out;
+}
+.oc3-eye {
+  position: absolute;
+  top: 5px;
+  width: 6px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--acc);
+  box-shadow:
+    0 0 7px 1.5px var(--glow),
+    inset 0 -2px 3px rgba(255, 255, 255, 0.28);
+  animation:
+    oc3-blink var(--blink-d, 4s) infinite var(--blink-delay, 0s),
+    oc3-glance var(--look-d, 8s) ease-in-out infinite var(--look-delay, 0s);
+}
+.oc3-eye-l { left: 7px; }
+.oc3-eye-r { right: 7px; }
+@keyframes oc3-blink {
+  0%, 91%, 100% { transform: scaleY(1); }
+  94.5% { transform: scaleY(0.08); }
+}
+@keyframes oc3-glance {
+  0%, 100% { transform: translateX(0); }
+  28% { transform: translateX(1.6px); }
+  58% { transform: translateX(-1.6px); }
+}
+
+/* ears — tiny side nubs on the head */
+.oc3-ear {
+  position: absolute;
+  top: 12px;
+  width: 4px;
+  height: 10px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--acc), rgba(124, 122, 255, 0.25));
+  opacity: 0.85;
+}
+.oc3-ear-l { left: -3px; }
+.oc3-ear-r { right: -3px; }
+
+/* neck */
+.oc3-neck {
+  position: absolute;
+  left: 50%;
+  top: 3px;
+  width: 10px;
+  height: 8px;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, rgba(124, 122, 255, 0.5), rgba(20, 22, 48, 0.9));
+  box-shadow: 0 0 8px -2px var(--glow);
+}
+
+/* torso: the body pod */
+.oc3-torso {
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  width: 46px;
+  height: 40px;
+  transform: translateX(-50%);
+  border-radius: 40% 40% 46% 46%;
+  background:
+    radial-gradient(circle at 32% 20%, rgba(255, 255, 255, 0.3), transparent 44%),
+    radial-gradient(circle at 74% 92%, rgba(3, 4, 12, 0.92), transparent 55%),
+    linear-gradient(160deg, #3b3e70 0%, #1e2044 48%, #0b0c1c 100%);
+  border: 1px solid rgba(148, 150, 220, 0.4);
+  box-shadow:
+    inset 0 2px 5px rgba(255, 255, 255, 0.15),
+    inset 0 -10px 16px rgba(0, 0, 0, 0.62),
+    0 14px 26px -12px rgba(0, 0, 0, 0.9),
+    0 0 22px -6px var(--glow);
+}
+
+/* chest light — the heart of the robot, beats while working */
+.oc3-chest {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: radial-gradient(circle at 36% 32%, #fff, var(--acc) 58%);
+  box-shadow: 0 0 12px 2px var(--glow), 0 0 3px 1px rgba(255, 255, 255, 0.4);
+  animation: oc3-heartbeat 2.6s ease-in-out infinite;
+}
+@keyframes oc3-heartbeat {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.85; }
+  50% { transform: translate(-50%, -50%) scale(1.18); opacity: 1; }
+}
+.oc3-unit[data-state="idle"] .oc3-chest { animation: none; opacity: 0.5; }
+.oc3-unit[data-state="done"] .oc3-chest { background: radial-gradient(circle at 36% 32%, #eafff5, #35d39a 58%); }
+
+/* the stage icon rides above the chest light */
+.oc3-chest-icon {
+  position: absolute;
+  left: 50%;
+  top: 46%;
   width: 13px;
   height: 13px;
   transform: translate(-50%, -50%);
-  color: var(--acc);
-  opacity: 0.9;
+  color: #f2f3ff;
+  opacity: 0.95;
+  filter: drop-shadow(0 0 4px var(--glow));
+  z-index: 1;
+}
+
+/* arms — thin dangling capsules */
+.oc3-arm {
+  position: absolute;
+  top: 16px;
+  width: 5px;
+  height: 26px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #333662, #14152e 80%);
+  border: 1px solid rgba(148, 150, 220, 0.28);
+  transform-origin: 50% 12%;
+  animation: oc3-sway 5.2s ease-in-out infinite;
+}
+.oc3-arm-l { left: -26px; }
+.oc3-arm-r { right: -26px; animation-delay: -2.6s; }
+@keyframes oc3-sway {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(3.5deg); }
+}
+
+/* hover skirt with the thruster glow under it */
+.oc3-skirt {
+  position: absolute;
+  left: 50%;
+  top: 48px;
+  width: 34px;
+  height: 9px;
+  transform: translateX(-50%);
+  border-radius: 3px 3px 8px 8px;
+  background: linear-gradient(180deg, #23264c, #0c0d20);
+  border: 1px solid rgba(148, 150, 220, 0.3);
+  box-shadow: 0 4px 10px -4px rgba(0, 0, 0, 0.9);
+}
+.oc3-skirt::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 22px;
+  height: 5px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: radial-gradient(50% 50% at 50% 50%, var(--acc), transparent 75%);
+  filter: blur(1.5px);
+  animation: oc3-thrust 0.55s ease-in-out infinite alternate;
+}
+@keyframes oc3-thrust {
+  from { opacity: 0.45; transform: translateX(-50%) scaleX(0.86); }
+  to { opacity: 0.95; transform: translateX(-50%) scaleX(1.12); }
 }
 
 /* antenna + beacon */
-.oc-antenna {
+.oc3-antenna {
   position: absolute;
   left: 50%;
-  top: -16px;
+  top: -52px;
   width: 1.5px;
-  height: 12px;
+  height: 14px;
   transform: translateX(-50%);
   background: linear-gradient(180deg, var(--acc), transparent);
 }
-.oc-beacon {
+.oc3-beacon {
   position: absolute;
   left: 50%;
-  top: -19px;
+  top: -18px;
   width: 4px;
   height: 4px;
   border-radius: 999px;
   transform: translateX(-50%);
   background: var(--acc);
   box-shadow: 0 0 8px 1px var(--glow);
-  animation: oc-beacon 2.2s ease-in-out infinite;
+  animation: oc3-beacon 2.2s ease-in-out infinite;
 }
-@keyframes oc-beacon {
+@keyframes oc3-beacon {
   0%, 100% { opacity: 0.35; }
   50% { opacity: 1; }
 }
 
 /* spinning targeting reticle while working */
-.oc-reticle {
+.oc3-reticle {
   position: absolute;
-  left: -38px;
-  top: -38px;
-  width: 76px;
-  height: 76px;
+  left: -36px;
+  top: -62px;
+  width: 72px;
+  height: 72px;
   border-radius: 999px;
   pointer-events: none;
   border: 1.5px dashed var(--acc);
-  opacity: 0.8;
-  animation: oc-spin 7s linear infinite;
+  opacity: 0.75;
+  animation: oc3-spin 7s linear infinite;
 }
-@keyframes oc-spin {
+@keyframes oc3-spin {
   to { transform: rotate(360deg); }
 }
 
-/* one-shot pulse rings when a bot boots up */
-.oc-pulse {
+/* one-shot pulse rings when a robot boots up */
+.oc3-pulse {
   position: absolute;
   left: -29px;
   top: -29px;
@@ -955,18 +1091,18 @@ body {
   pointer-events: none;
   border: 1.5px solid var(--acc);
   opacity: 0;
-  animation: oc-pulse 0.9s cubic-bezier(0.16, 1, 0.3, 1) 2 both;
+  animation: oc3-pulse 0.9s cubic-bezier(0.16, 1, 0.3, 1) 2 both;
 }
-@keyframes oc-pulse {
+@keyframes oc3-pulse {
   0% { opacity: 0.85; transform: scale(1); }
   100% { opacity: 0; transform: scale(1.9); }
 }
 
 /* done seal */
-.oc-seal {
+.oc3-seal {
   position: absolute;
-  right: -8px;
-  top: -6px;
+  right: -22px;
+  top: -46px;
   width: 20px;
   height: 20px;
   border-radius: 999px;
@@ -977,34 +1113,60 @@ body {
   background: linear-gradient(160deg, rgba(53, 211, 154, 0.28), rgba(53, 211, 154, 0.12));
   border: 1px solid rgba(53, 211, 154, 0.75);
   box-shadow: 0 0 14px -2px rgba(53, 211, 154, 0.8);
-  animation: oc-pop 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: oc3-pop 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
-.oc-seal svg { width: 11px; height: 11px; }
-@keyframes oc-pop {
+.oc3-seal svg { width: 11px; height: 11px; }
+@keyframes oc3-pop {
   0% { opacity: 0; transform: scale(0.3); }
   100% { opacity: 1; transform: scale(1); }
 }
 
-/* grounding shadow under the pod */
-.oc-shadow {
+/* failed: a hot alert badge that flashes */
+.oc3-alert {
+  position: absolute;
+  right: -22px;
+  top: -46px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffb3a6;
+  background: linear-gradient(160deg, rgba(255, 107, 90, 0.35), rgba(255, 107, 90, 0.14));
+  border: 1px solid rgba(255, 107, 90, 0.8);
+  box-shadow: 0 0 14px -2px rgba(255, 107, 90, 0.85);
+  animation: oc3-alert 0.9s ease-in-out infinite;
+}
+@keyframes oc3-alert {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 1; }
+}
+
+/* grounding shadow under the robot */
+.oc3-shadow {
   position: absolute;
   left: 50%;
-  top: 31px;
-  width: 52px;
-  height: 11px;
+  top: 64px;
+  width: 54px;
+  height: 12px;
   transform: translateX(-50%);
   pointer-events: none;
-  background: radial-gradient(50% 50% at 50% 50%, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0) 70%);
+  background: radial-gradient(50% 50% at 50% 50%, rgba(0, 0, 0, 0.62), rgba(0, 0, 0, 0) 70%);
   filter: blur(1px);
 }
 
-/* holo name plate — full status, never truncated away */
-.oc-plate {
+/* ————— holo name plate ————— */
+
+.oc3-tag {
   position: absolute;
   left: 50%;
-  top: 41px;
+  top: 78px;
   transform: translateX(-50%);
-  width: clamp(120px, 17.6cqw, 178px);
+  width: clamp(118px, 17cqw, 176px);
   padding: 6px 9px 7px;
   background: linear-gradient(180deg, rgba(21, 23, 48, 0.92), rgba(11, 12, 26, 0.88));
   border: 1px solid rgba(148, 150, 220, 0.24);
@@ -1015,7 +1177,7 @@ body {
   transition: border-color 0.4s, box-shadow 0.4s;
   text-align: left;
 }
-.oc-plate::before {
+.oc3-tag::before {
   content: "";
   position: absolute;
   top: 0;
@@ -1025,15 +1187,15 @@ body {
   background: var(--acc);
   opacity: 0.75;
 }
-.oc-unit:hover .oc-plate { border-color: var(--acc); }
-.oc-bot[data-state="idle"] .oc-plate { opacity: 0.82; }
+.oc3-unit:hover .oc3-tag { border-color: var(--acc); }
+.oc3-bot-unit[data-state="idle"] .oc3-tag { opacity: 0.82; }
 
-.oc-plate-head {
+.oc3-tag-head {
   display: flex;
   align-items: center;
   gap: 5px;
 }
-.oc-plate-name {
+.oc3-tag-name {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 9px;
   letter-spacing: 0.18em;
@@ -1041,7 +1203,7 @@ body {
   color: var(--acc);
   white-space: nowrap;
 }
-.oc-plate-badge {
+.oc3-tag-badge {
   flex-shrink: 0;
   border: 1px solid rgba(255, 107, 90, 0.4);
   background: rgba(255, 107, 90, 0.12);
@@ -1053,7 +1215,7 @@ body {
   letter-spacing: 0.08em;
   white-space: nowrap;
 }
-.oc-plate-line {
+.oc3-tag-line {
   margin-top: 3px;
   min-height: 30px;
   display: -webkit-box;
@@ -1066,76 +1228,80 @@ body {
   color: rgba(196, 200, 236, 0.85);
   overflow-wrap: anywhere;
 }
-.oc-unit[data-state="idle"] .oc-plate-line { color: rgba(150, 154, 196, 0.6); }
+.oc3-bot-unit[data-state="idle"] .oc3-tag-line { color: rgba(150, 154, 196, 0.6); }
 
-/* ————— the orchestrator core ————— */
+/* ————— the orchestrator station ————— */
 
-.oc-core .oc-pod {
-  left: -47px;
-  top: -47px;
-  width: 94px;
-  height: 94px;
-  border-radius: 46%;
-  transform: rotateX(11deg);
-  box-shadow:
-    inset 0 3px 8px rgba(255, 255, 255, 0.18),
-    inset 0 -14px 24px rgba(0, 0, 0, 0.62),
-    0 22px 44px -14px rgba(0, 0, 0, 0.95),
-    0 0 44px -6px var(--glow);
+.oc3-core .oc3-head {
+  width: 64px;
+  height: 52px;
+  top: -52px;
+  border-radius: 26px 26px 20px 20px;
 }
-.oc-core .oc-visor { left: 26%; right: 26%; top: 35%; height: 15%; }
-.oc-core .oc-emblem { width: 22px; height: 22px; top: 64%; }
-.oc-core .oc-halo { left: -72px; top: -72px; width: 144px; height: 144px; }
-.oc-core .oc-shadow { top: 52px; width: 86px; height: 16px; }
-.oc-core .oc-antenna { top: -20px; height: 14px; }
-.oc-core .oc-beacon { top: -24px; width: 5px; height: 5px; }
-.oc-reticle-core { left: -56px; top: -56px; width: 112px; height: 112px; }
-.oc-seal-core { right: -4px; top: -4px; width: 24px; height: 24px; }
-.oc-seal-core svg { width: 13px; height: 13px; }
+.oc3-core .oc3-face { left: 7px; right: 7px; top: 11px; height: 26px; }
+.oc3-core .oc3-eye { width: 8px; height: 11px; top: 7px; }
+.oc3-core .oc3-eye-l { left: 10px; }
+.oc3-core .oc3-eye-r { right: 10px; }
+.oc3-core .oc3-ear { height: 14px; top: 18px; }
+.oc3-core .oc3-neck { top: 2px; width: 14px; height: 8px; }
+.oc3-core .oc3-torso { width: 74px; height: 58px; top: 9px; border-radius: 42% 42% 48% 48%; }
+.oc3-core .oc3-chest { width: 18px; height: 18px; }
+.oc3-core .oc3-arm { display: none; }
+.oc3-core .oc3-skirt { width: 52px; top: 64px; }
+.oc3-core .oc3-shadow { top: 84px; width: 84px; height: 16px; }
+.oc3-core .oc3-antenna { top: -66px; height: 16px; }
+.oc3-core .oc3-beacon { top: -20px; width: 5px; height: 5px; }
+
+/* the core rides its own halo element scaled up */
+.oc3-core .oc3-halo { left: -74px; top: -74px; width: 148px; height: 148px; }
+
+/* the chest emblem (Sparkles) sits in the torso */
+.oc3-torso-core .oc3-chest-icon { display: none; }
+.oc3-torso-core .oc3-chest { display: block; }
 
 /* gyroscope rings — dashed, tilted, spinning on different axes */
-.oc-ring {
+.oc3-ring {
   position: absolute;
   border-radius: 999px;
   pointer-events: none;
   border: 1.5px dashed rgba(148, 146, 255, 0.45);
 }
-.oc-ring-a {
-  left: -62px;
-  top: -62px;
-  width: 124px;
-  height: 124px;
-  animation: oc-gyro-a 9s linear infinite;
+.oc3-ring-a {
+  left: -64px;
+  top: -64px;
+  width: 128px;
+  height: 128px;
+  animation: oc3-gyro-a 9s linear infinite;
 }
-.oc-ring-b {
-  left: -55px;
-  top: -55px;
-  width: 110px;
-  height: 110px;
+.oc3-ring-b {
+  left: -57px;
+  top: -57px;
+  width: 114px;
+  height: 114px;
   border-color: rgba(56, 217, 240, 0.4);
-  animation: oc-gyro-b 13s linear infinite reverse;
+  animation: oc3-gyro-b 13s linear infinite reverse;
 }
-@keyframes oc-gyro-a {
+@keyframes oc3-gyro-a {
   from { transform: rotateX(74deg) rotateZ(0deg); }
   to { transform: rotateX(74deg) rotateZ(360deg); }
 }
-@keyframes oc-gyro-b {
+@keyframes oc3-gyro-b {
   from { transform: rotateY(74deg) rotateZ(0deg); }
   to { transform: rotateY(74deg) rotateZ(360deg); }
 }
 
 /* spark drones circling the core */
-.oc-orbit-dot {
+.oc3-orbit-dot {
   position: absolute;
-  left: -47px;
-  top: -47px;
-  width: 94px;
-  height: 94px;
+  left: -49px;
+  top: -49px;
+  width: 98px;
+  height: 98px;
   border-radius: 999px;
   pointer-events: none;
-  animation: oc-orbit-spin 6s linear infinite;
+  animation: oc3-orbit-spin 6s linear infinite;
 }
-.oc-orbit-dot::before {
+.oc3-orbit-dot::before {
   content: "";
   position: absolute;
   left: 50%;
@@ -1147,56 +1313,59 @@ body {
   background: #38d9f0;
   box-shadow: 0 0 8px 2px rgba(56, 217, 240, 0.7);
 }
-.oc-orbit-dot-b {
-  left: -59px;
-  top: -59px;
-  width: 118px;
-  height: 118px;
+.oc3-orbit-dot-b {
+  left: -61px;
+  top: -61px;
+  width: 122px;
+  height: 122px;
   animation-duration: 9.5s;
   animation-direction: reverse;
 }
-.oc-orbit-dot-b::before {
+.oc3-orbit-dot-b::before {
   width: 4px;
   height: 4px;
   background: #7c7aff;
   box-shadow: 0 0 8px 2px rgba(124, 122, 255, 0.7);
 }
-@keyframes oc-orbit-spin {
+@keyframes oc3-orbit-spin {
   to { transform: rotate(360deg); }
 }
 
-.oc-core .oc-plate {
-  top: 58px;
-  width: clamp(220px, 30cqw, 320px);
+/* the core's plate sits BESIDE the station — clear of prompt/verify pods */
+.oc3-tag-core {
+  top: 6px;
+  left: auto;
+  right: -286px;
+  width: clamp(220px, 24cqw, 268px);
+  transform: none;
 }
-.oc-core-head { justify-content: center; }
-.oc-core-line {
+.oc3-tag-core .oc3-tag-head { justify-content: flex-start; }
+.oc3-tag-core .oc3-tag-line {
   -webkit-line-clamp: 2;
   min-height: 30px;
-  text-align: center;
 }
 
 /* ————— the worker drone orbit ————— */
 
-.oc-orbit-track {
+.oc3-orbit-track {
   position: absolute;
   left: 0;
   top: 0;
-  width: 184px;
-  height: 52px;
+  width: 200px;
+  height: 48px;
   transform: translate(-50%, -50%);
   border: 1px dashed rgba(124, 122, 255, 0.25);
   border-radius: 50%;
   pointer-events: none;
 }
-.oc-worker {
+.oc3-worker {
   position: absolute;
   left: 0;
   top: 0;
   will-change: transform, opacity;
   pointer-events: none;
 }
-.oc-worker-chip {
+.oc3-worker-chip {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1212,31 +1381,31 @@ body {
   box-shadow: 0 8px 20px -10px rgba(0, 0, 0, 0.95), 0 0 18px -6px rgba(124, 122, 255, 0.65);
   backdrop-filter: blur(4px);
 }
-.oc-worker-done {
+.oc3-worker-done {
   border-color: rgba(53, 211, 154, 0.5);
   color: #5fe6b0;
   box-shadow: 0 8px 20px -10px rgba(0, 0, 0, 0.95), 0 0 14px -6px rgba(53, 211, 154, 0.6);
 }
-.oc-worker-failed {
+.oc3-worker-failed {
   border-color: rgba(255, 107, 90, 0.5);
   color: #ff9d8d;
 }
 
 /* ————— the meter ————— */
 
-.oc-meter-lock {
-  animation: oc-meter-lock 0.9s ease-out both;
+.oc3-meter-lock {
+  animation: oc3-meter-lock 0.9s ease-out both;
 }
-@keyframes oc-meter-lock {
+@keyframes oc3-meter-lock {
   0% { filter: brightness(1); }
   40% { filter: brightness(1.7); }
   100% { filter: brightness(1.15); }
 }
-.oc-sweepbar {
+.oc3-sweepbar {
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.5), transparent);
-  animation: oc-sweepbar 1.4s linear infinite;
+  animation: oc3-sweepbar 1.4s linear infinite;
 }
-@keyframes oc-sweepbar {
+@keyframes oc3-sweepbar {
   from { transform: translateX(-100%); }
   to { transform: translateX(100%); }
 }
@@ -1244,38 +1413,46 @@ body {
 /* ————— reduced motion: everything settles to a calm, readable scene ————— */
 
 @media (prefers-reduced-motion: reduce) {
-  .oc-unit,
-  .oc-lift,
-  .oc-bob,
-  .oc-halo,
-  .oc-reticle,
-  .oc-pulse,
-  .oc-seal,
-  .oc-beacon,
-  .oc-visor-live,
-  .oc-ring-a,
-  .oc-ring-b,
-  .oc-orbit-dot-a,
-  .oc-orbit-dot-b,
-  .oc-nebula,
-  .oc-stars-a,
-  .oc-stars-b,
-  .oc-stars-c,
-  .oc-shoot-a,
-  .oc-shoot-b,
-  .oc-floor,
-  .oc-scan::after,
-  .oc-meter-lock,
-  .oc-sweepbar {
+  .oc3-unit,
+  .oc3-lift,
+  .oc3-bob,
+  .oc3-halo,
+  .oc3-head,
+  .oc3-eye,
+  .oc3-arm,
+  .oc3-skirt::after,
+  .oc3-chest,
+  .oc3-reticle,
+  .oc3-pulse,
+  .oc3-seal,
+  .oc3-alert,
+  .oc3-beacon,
+  .oc3-ring-a,
+  .oc3-ring-b,
+  .oc3-orbit-dot-a,
+  .oc3-orbit-dot-b,
+  .oc3-nebula,
+  .oc3-stars-a,
+  .oc3-stars-b,
+  .oc3-stars-c,
+  .oc3-shoot-a,
+  .oc3-shoot-b,
+  .oc3-floor,
+  .oc3-scan::after,
+  .oc3-meter-lock,
+  .oc3-sweepbar {
     animation: none !important;
   }
-  .oc-unit {
+  .oc3-unit {
     opacity: 1 !important;
     transform: translate(-50%, -50%) !important;
     filter: none !important;
   }
-  .oc-draw,
-  .oc-draw-done {
+  .oc3-eyes {
+    transform: none !important;
+  }
+  .oc3-draw,
+  .oc3-draw-done {
     animation: none !important;
     stroke-dasharray: none !important;
     stroke-dashoffset: 0 !important;

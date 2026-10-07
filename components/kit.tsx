@@ -21,11 +21,11 @@ const TONE_TEXT: Record<Tone, string> = {
 
 const TONE_CHIP: Record<Tone, string> = {
   neutral: "border-edge bg-surface2 text-t2",
-  brand: "border-brand/30 bg-brand/10 text-brand",
-  pass: "border-pass/30 bg-pass/10 text-pass",
-  warn: "border-warn/30 bg-warn/10 text-warn",
-  bad: "border-bad/30 bg-bad/10 text-bad",
-  info: "border-info/30 bg-info/10 text-info",
+  brand: "border-brand/35 bg-brand/10 text-brand shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]",
+  pass: "border-pass/30 bg-pass/10 text-pass shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]",
+  warn: "border-warn/30 bg-warn/10 text-warn shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]",
+  bad: "border-bad/30 bg-bad/10 text-bad shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]",
+  info: "border-info/30 bg-info/10 text-info shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]",
 };
 
 export const toneText = (t: Tone) => TONE_TEXT[t];
@@ -105,8 +105,11 @@ type Size = "sm" | "md" | "lg";
 
 const VARIANT: Record<Variant, string> = {
   primary: "bg-t1 text-app hover:bg-white border border-transparent",
-  brand: "bg-brand text-white hover:bg-brand/90 border border-transparent shadow-[0_1px_0_0_rgba(255,255,255,0.12)_inset]",
-  outline: "border border-edge bg-surface2 text-t1 hover:border-edge2 hover:bg-surface3",
+  brand:
+    "bg-[linear-gradient(180deg,#8b89ff,#6d6bf0_58%,#5b59e8)] text-white border border-brand/60 " +
+    "shadow-[inset_0_1px_0_0_rgba(255,255,255,0.28),0_6px_20px_-8px_rgba(124,122,255,0.65)] " +
+    "hover:bg-[linear-gradient(180deg,#9795ff,#7a78f4_58%,#6765ee)] hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.32),0_8px_26px_-8px_rgba(124,122,255,0.8)]",
+  outline: "border border-edge bg-surface2/80 text-t1 hover:border-edge2 hover:bg-surface3",
   ghost: "border border-transparent text-t2 hover:bg-surface2 hover:text-t1",
   danger: "border border-bad/30 bg-bad/10 text-bad hover:bg-bad/15",
 };

@@ -53,24 +53,26 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-7">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="eyebrow mb-2">One sentence in · verified link out</p>
-          <h1 className="display text-[26px] font-semibold leading-tight tracking-[-0.03em] text-t1 md:text-[32px]">
-            {greeting()}, {name}
-          </h1>
-          <p className="mt-1.5 max-w-xl text-[13.5px] leading-relaxed text-t3">
-            Describe the product. The Research Agent searches the live web, the spec lands here for your
-            approval, and nothing ships until verification has driven the real app.
-          </p>
-        </div>
+      <header className="relative">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -top-10 -left-6 h-[180px] w-[420px] rounded-full bg-[radial-gradient(closest-side,rgba(124,122,255,0.12),transparent)] blur-2xl"
+        />
+        <p className="eyebrow mb-2">One sentence in · verified link out</p>
+        <h1 className="display text-[26px] font-semibold leading-tight tracking-[-0.03em] text-t1 md:text-[32px]">
+          {greeting()}, <span className="bg-gradient-to-r from-brand via-info to-brand bg-clip-text text-transparent">{name}</span>
+        </h1>
+        <p className="mt-1.5 max-w-xl text-[13.5px] leading-relaxed text-t3">
+          Describe the product. The Research Agent searches the live web, the spec lands here for your
+          approval, and nothing ships until verification has driven the real app.
+        </p>
       </header>
 
       {/* a run blocked on a human is the only thing on this page that is
           actually urgent, so it goes above the composer */}
       {awaiting.length > 0 ? (
-        <div className="overflow-hidden rounded-[14px] border border-warn/30 bg-surface">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-warn/20 px-4 py-2.5">
+        <div className="overflow-hidden rounded-[14px] border border-warn/30 bg-surface shadow-[0_0_40px_-18px_rgba(233,162,59,0.5)]">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-warn/20 bg-[linear-gradient(90deg,rgba(233,162,59,0.08),transparent_65%)] px-4 py-2.5">
             <span className="flex items-center gap-2.5">
               <UserCheck className="h-3.5 w-3.5 text-warn" />
               <span className="eyebrow text-warn">
@@ -183,8 +185,18 @@ function Tile({
         : tone === "warn"
           ? "text-warn"
           : "text-t1";
+  const accentLine =
+    tone === "pass"
+      ? "bg-pass/70"
+      : tone === "brand"
+        ? "bg-brand/70"
+        : tone === "warn"
+          ? "bg-warn/70"
+          : "bg-edge2";
+
   return (
-    <div className="panel relative overflow-hidden rounded-[14px] p-4">
+    <div className="panel lift relative overflow-hidden rounded-[14px] p-4">
+      <span aria-hidden className={"absolute inset-x-0 top-0 h-px opacity-70 " + accentLine} />
       <div className="flex items-center justify-between">
         <span className="eyebrow">{label}</span>
         <span
@@ -201,7 +213,7 @@ function Tile({
           {icon}
         </span>
       </div>
-      <p className={"display tnum mt-2.5 text-[26px] font-semibold leading-none tracking-[-0.02em] " + valueTone}>
+      <p className={"display tnum mt-2.5 text-[27px] font-semibold leading-none tracking-[-0.02em] " + valueTone}>
         {value}
       </p>
       <p className="mt-1.5 truncate text-[11.5px] text-t3">{hint}</p>

@@ -156,8 +156,10 @@ export function Orchestrator({ initial, onRefreshChrome }: { initial: RunStateDT
             aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
             className={cn(
-              "flex h-9 items-center gap-2 rounded-[10px] border px-3.5 text-[12.5px] transition-colors",
-              tab === t.id ? "border-brand/40 bg-brand/12 text-brand" : "border-edge bg-surface text-t3 hover:text-t1",
+              "flex h-9 items-center gap-2 rounded-[10px] border px-3.5 text-[12.5px] transition-all",
+              tab === t.id
+                ? "border-brand/45 bg-[linear-gradient(180deg,rgba(124,122,255,0.18),rgba(124,122,255,0.06))] text-brand shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08),0_4px_16px_-8px_rgba(124,122,255,0.55)]"
+                : "border-edge bg-surface/80 text-t3 hover:text-t1",
             )}
           >
             <t.icon className="h-3.5 w-3.5" />
