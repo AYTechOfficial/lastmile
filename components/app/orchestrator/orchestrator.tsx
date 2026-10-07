@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Code2, LayoutPanelLeft, Maximize2, Minimize2, Monitor, ScrollText } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { RunStateDTO } from "@/lib/run-dto";
@@ -171,39 +172,55 @@ export function Orchestrator({
     <div className="space-y-4" aria-live="polite">
       <span className="sr-only" role="status">{announcement}</span>
 
-      {deckFull ? (
-        <div className="fixed inset-0 z-[70] flex flex-col bg-app" role="dialog" aria-label="Full orchestration deck">
-          <div className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-edge bg-app/95 px-4">
-            <div className="flex min-w-0 items-center gap-2.5">
-              <span className="eyebrow">orchestration deck</span>
-              <span className="hidden min-w-0 truncate text-[12.5px] text-t3 sm:inline">— {run.title}</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setDeckFull(false)}
-              className="flex h-8 shrink-0 items-center gap-2 rounded-[9px] border border-edge bg-surface px-3 text-[12px] text-t2 transition-colors hover:border-brand/40 hover:text-brand"
+      {/* deckFull can only be true after a click, so document exists here even
+          though the first render is on the server */}
+      {deckFull && typeof document !== "undefined"
+        ? createPortal(
+            /* Portalled to the body: the page sits in a `relative z-10`
+               stacking context, so a fixed overlay rendered in place would be
+               painted under the sidebar (z-40). A portal is the only way this
+               is genuinely the whole window. */
+            <div
+              className="fixed inset-0 z-[100] flex flex-col bg-app"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Full orchestration deck"
             >
-              <Minimize2 className="h-3.5 w-3.5" />
-              exit full deck
-              <span className="hidden font-mono text-[9.5px] text-t3 sm:inline">esc</span>
-            </button>
-          </div>
-          <div className="grid min-h-0 flex-1 gap-3 p-3 xl:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
-            <div className="thin-scroll min-h-0 min-w-0 overflow-y-auto">
-              <PipelineCanvas {...deckProps} />
-            </div>
-            <div className="min-h-0 min-w-0">
-              <ActivityLog
-                events={state.events}
-                runNumber={run.runNumber}
-                live={meta.live}
-                className="flex h-full flex-col"
-                bodyClassName="min-h-0 flex-1"
-              />
-            </div>
-          </div>
-        </div>
-      ) : null}
+              <div className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-edge bg-app/95 px-4">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span className="eyebrow">orchestration deck</span>
+                  <span className="hidden min-w-0 truncate text-[12.5px] text-t3 sm:inline">
+                    — {run.title}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDeckFull(false)}
+                  className="flex h-8 shrink-0 items-center gap-2 rounded-[9px] border border-edge bg-surface px-3 text-[12px] text-t2 transition-colors hover:border-brand/40 hover:text-brand"
+                >
+                  <Minimize2 className="h-3.5 w-3.5" />
+                  exit full deck
+                  <span className="hidden font-mono text-[9.5px] text-t3 sm:inline">esc</span>
+                </button>
+              </div>
+              <div className="grid min-h-0 flex-1 gap-3 p-3 xl:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
+                <div className="thin-scroll min-h-0 min-w-0 overflow-y-auto">
+                  <PipelineCanvas {...deckProps} />
+                </div>
+                <div className="min-h-0 min-w-0">
+                  <ActivityLog
+                    events={state.events}
+                    runNumber={run.runNumber}
+                    live={meta.live}
+                    className="flex h-full flex-col"
+                    bodyClassName="min-h-0 flex-1"
+                  />
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
       {!deckFull && takeover ? (
         <CompletionTakeover
