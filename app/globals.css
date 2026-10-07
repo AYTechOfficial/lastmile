@@ -517,154 +517,773 @@ body {
 }
 
 /* ==========================================================================
-   ORCHESTRATION CANVAS — the agent graph's motion vocabulary.
-   Transform/opacity only; every animation collapses under reduced motion.
+   ORCHESTRATION CANVAS — cinematic 3D mission deck.
+   A perspective stage in deep space: gyroscope core, floating dome bots with
+   visors and grounding shadows, worker drones on a depth-correct orbit,
+   parallax starfield, perspective grid floor, meteors, radar sweep.
+   Transform/opacity/filter only; everything collapses under reduced motion.
    ========================================================================== */
 
-@keyframes dash-flow {
-  to { stroke-dashoffset: -24; }
+/* ————— the stage ————— */
+
+.oc-stage {
+  perspective: 1200px;
+  perspective-origin: 50% 26%;
+  background: linear-gradient(180deg, #0d0f24 0%, #0a0b1a 44%, #06070f 100%);
 }
 
-@keyframes spawn-pop {
-  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
-  60% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
-  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.oc-nebula {
+  position: absolute;
+  inset: -22%;
+  pointer-events: none;
+  background:
+    radial-gradient(40% 30% at 50% 14%, rgba(124, 122, 255, 0.2), transparent 70%),
+    radial-gradient(26% 22% at 18% 58%, rgba(56, 217, 240, 0.1), transparent 70%),
+    radial-gradient(26% 22% at 82% 55%, rgba(53, 211, 154, 0.08), transparent 70%),
+    radial-gradient(34% 26% at 50% 88%, rgba(124, 122, 255, 0.1), transparent 72%);
+  animation: oc-nebula 14s ease-in-out infinite alternate;
 }
-.spawn-pop {
-  animation: spawn-pop 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-@keyframes node-glow {
-  0%, 100% { box-shadow: 0 0 22px -8px rgba(124, 122, 255, 0.45); }
-  50% { box-shadow: 0 0 34px -6px rgba(124, 122, 255, 0.75); }
-}
-.node-glow {
-  animation: node-glow 2s ease-in-out infinite;
-}
-
-@keyframes node-shake {
-  0%, 100% { transform: translate(-50%, -50%) translateX(0); }
-  25% { transform: translate(-50%, -50%) translateX(-2.5px); }
-  75% { transform: translate(-50%, -50%) translateX(2.5px); }
-}
-.node-shake {
-  animation: node-shake 0.32s ease-in-out 3;
+@keyframes oc-nebula {
+  from { transform: translate3d(-1.2%, -0.8%, 0) scale(1); opacity: 0.85; }
+  to { transform: translate3d(1.2%, 1.2%, 0) scale(1.05); opacity: 1; }
 }
 
-@keyframes core-breathe {
-  0%, 100% { transform: scale(1); opacity: 0.9; }
-  50% { transform: scale(1.05); opacity: 1; }
-}
-.core-breathe {
-  animation: core-breathe 2.8s ease-in-out infinite;
-}
-
-/* green flash along a finished connector */
-@keyframes sweep-once {
-  from { stroke-dashoffset: 300; }
-  to { stroke-dashoffset: 0; }
-}
-.sweep-once {
-  stroke-dasharray: 300;
-  animation: sweep-once 0.65s ease-out both;
-}
-
-/* the meter locking at 100 */
-@keyframes meter-lock {
-  0% { filter: brightness(1); }
-  40% { filter: brightness(1.6); }
-  100% { filter: brightness(1.15); }
-}
-.meter-lock {
-  animation: meter-lock 0.9s ease-out both;
-}
-
-/* ————— AAA layer: depth, drift and worker motion ————— */
-
-/* slow star drift behind the graph — two layers at different depths */
-.canvas-stars,
-.canvas-stars-far {
+/* three parallax star sheets at different depths */
+.oc-stars {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
-.canvas-stars {
+.oc-stars-a {
+  opacity: 0.9;
   background-image:
-    radial-gradient(1.2px 1.2px at 12% 24%, rgba(255,255,255,0.55), transparent 60%),
-    radial-gradient(1px 1px at 34% 68%, rgba(255,255,255,0.4), transparent 60%),
-    radial-gradient(1.4px 1.4px at 58% 18%, rgba(124,122,255,0.6), transparent 60%),
-    radial-gradient(1px 1px at 76% 52%, rgba(255,255,255,0.45), transparent 60%),
-    radial-gradient(1.2px 1.2px at 88% 80%, rgba(56,217,240,0.5), transparent 60%),
-    radial-gradient(1px 1px at 22% 86%, rgba(255,255,255,0.35), transparent 60%),
-    radial-gradient(1.3px 1.3px at 46% 40%, rgba(255,255,255,0.5), transparent 60%),
-    radial-gradient(1px 1px at 68% 90%, rgba(124,122,255,0.45), transparent 60%);
-  animation: star-drift 26s linear infinite;
-  opacity: 0.8;
+    radial-gradient(1.3px 1.3px at 11% 22%, rgba(255, 255, 255, 0.6), transparent 60%),
+    radial-gradient(1px 1px at 33% 66%, rgba(255, 255, 255, 0.45), transparent 60%),
+    radial-gradient(1.5px 1.5px at 57% 16%, rgba(124, 122, 255, 0.65), transparent 60%),
+    radial-gradient(1px 1px at 75% 50%, rgba(255, 255, 255, 0.5), transparent 60%),
+    radial-gradient(1.3px 1.3px at 88% 78%, rgba(56, 217, 240, 0.55), transparent 60%),
+    radial-gradient(1px 1px at 21% 84%, rgba(255, 255, 255, 0.4), transparent 60%),
+    radial-gradient(1.4px 1.4px at 45% 38%, rgba(255, 255, 255, 0.55), transparent 60%),
+    radial-gradient(1px 1px at 67% 88%, rgba(124, 122, 255, 0.5), transparent 60%);
+  animation: oc-drift 30s linear infinite;
 }
-.canvas-stars-far {
+.oc-stars-b {
+  opacity: 0.6;
   background-image:
-    radial-gradient(1px 1px at 8% 60%, rgba(255,255,255,0.28), transparent 60%),
-    radial-gradient(1px 1px at 30% 12%, rgba(255,255,255,0.22), transparent 60%),
-    radial-gradient(1px 1px at 52% 76%, rgba(255,255,255,0.25), transparent 60%),
-    radial-gradient(1px 1px at 72% 34%, rgba(255,255,255,0.2), transparent 60%),
-    radial-gradient(1px 1px at 94% 14%, rgba(255,255,255,0.24), transparent 60%);
-  animation: star-drift 44s linear infinite reverse;
-  opacity: 0.5;
+    radial-gradient(1px 1px at 8% 60%, rgba(255, 255, 255, 0.35), transparent 60%),
+    radial-gradient(1px 1px at 30% 12%, rgba(255, 255, 255, 0.3), transparent 60%),
+    radial-gradient(1.2px 1.2px at 52% 74%, rgba(255, 255, 255, 0.32), transparent 60%),
+    radial-gradient(1px 1px at 72% 32%, rgba(255, 255, 255, 0.28), transparent 60%),
+    radial-gradient(1.1px 1.1px at 94% 14%, rgba(255, 255, 255, 0.3), transparent 60%),
+    radial-gradient(1px 1px at 60% 92%, rgba(56, 217, 240, 0.3), transparent 60%);
+  animation: oc-drift 46s linear infinite reverse;
 }
-@keyframes star-drift {
-  from { transform: translate3d(0, 0, 0); }
-  to { transform: translate3d(-14px, -22px, 0); }
+.oc-stars-c {
+  opacity: 0.4;
+  background-image:
+    radial-gradient(1px 1px at 16% 40%, rgba(255, 255, 255, 0.5), transparent 60%),
+    radial-gradient(1px 1px at 42% 8%, rgba(255, 255, 255, 0.4), transparent 60%),
+    radial-gradient(1px 1px at 66% 58%, rgba(255, 255, 255, 0.45), transparent 60%),
+    radial-gradient(1px 1px at 84% 88%, rgba(255, 255, 255, 0.4), transparent 60%),
+    radial-gradient(1px 1px at 5% 76%, rgba(124, 122, 255, 0.4), transparent 60%);
+  animation: oc-drift 70s linear infinite;
+}
+@keyframes oc-drift {
+  to { transform: translate3d(-18px, -26px, 0); }
 }
 
-/* nebula wash — the aurora behind the orchestrator core */
-.canvas-nebula {
+/* occasional meteors streaking through the field */
+.oc-shoot {
   position: absolute;
-  inset: -20%;
+  width: 120px;
+  height: 1px;
   pointer-events: none;
-  background:
-    radial-gradient(42% 34% at 50% 16%, rgba(124, 122, 255, 0.14), transparent 70%),
-    radial-gradient(30% 26% at 24% 66%, rgba(56, 217, 240, 0.08), transparent 70%),
-    radial-gradient(30% 26% at 78% 62%, rgba(53, 211, 154, 0.06), transparent 70%);
-  animation: nebula-sway 12s ease-in-out infinite alternate;
+  opacity: 0;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.85), rgba(124, 122, 255, 0));
 }
-@keyframes nebula-sway {
-  from { transform: translate3d(-1.5%, -1%, 0) scale(1); opacity: 0.85; }
-  to { transform: translate3d(1.5%, 1.5%, 0) scale(1.04); opacity: 1; }
+.oc-shoot-a {
+  top: 16%;
+  left: 10%;
+  --tilt: -26deg;
+  animation: oc-meteor 12s linear infinite 3s;
+}
+.oc-shoot-b {
+  top: 9%;
+  left: 55%;
+  --tilt: -22deg;
+  animation: oc-meteor 15s linear infinite 9s;
+}
+@keyframes oc-meteor {
+  0%, 82% { opacity: 0; transform: rotate(var(--tilt, -26deg)) translateX(0); }
+  85% { opacity: 0.8; }
+  94%, 100% { opacity: 0; transform: rotate(var(--tilt, -26deg)) translateX(620px); }
 }
 
-/* worker pulse — the ring beat of a live worker agent */
-@keyframes worker-pulse {
-  0%, 100% { box-shadow: 0 0 12px -4px rgba(56, 217, 240, 0.5); }
-  50% { box-shadow: 0 0 20px -2px rgba(56, 217, 240, 0.85); }
+/* perspective grid floor — the "ground plane" that sells the 3D stage */
+.oc-floor {
+  position: absolute;
+  left: -14%;
+  right: -14%;
+  bottom: -4%;
+  height: 46%;
+  background-image:
+    linear-gradient(rgba(124, 122, 255, 0.13) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(124, 122, 255, 0.09) 1px, transparent 1px);
+  background-size: 46px 36px;
+  transform: perspective(640px) rotateX(62deg);
+  transform-origin: 50% 100%;
+  -webkit-mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.95) 22%, transparent 88%);
+  mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.95) 22%, transparent 88%);
+  animation: oc-floor 7s linear infinite;
 }
-.worker-pulse {
-  animation: worker-pulse 1.4s ease-in-out infinite;
+@keyframes oc-floor {
+  from { background-position: 0 0; }
+  to { background-position: 0 36px; }
 }
 
-/* scanning beam across the whole canvas while any stage works — a radar sweep
-   that reads as "the orchestrator is watching its agents" */
-.canvas-scan {
+/* stage light rising from the horizon behind the bots */
+.oc-horizon {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 26%;
+  height: 36%;
+  pointer-events: none;
+  background: radial-gradient(48% 100% at 50% 100%, rgba(124, 122, 255, 0.12), transparent 72%);
+}
+
+/* radar sweep while anything runs */
+.oc-scan {
   position: absolute;
   inset: 0;
   pointer-events: none;
   overflow: hidden;
+  z-index: 1;
 }
-.canvas-scan::after {
+.oc-scan::after {
   content: "";
   position: absolute;
-  left: -20%;
-  top: 0;
-  height: 100%;
-  width: 18%;
-  background: linear-gradient(100deg, transparent, rgba(124, 122, 255, 0.06) 45%, rgba(124, 122, 255, 0.1) 50%, rgba(124, 122, 255, 0.06) 55%, transparent);
-  animation: canvas-sweep 7s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  top: -10%;
+  bottom: -10%;
+  left: -24%;
+  width: 16%;
+  background: linear-gradient(100deg, transparent, rgba(124, 122, 255, 0.06) 42%, rgba(124, 122, 255, 0.13) 50%, rgba(124, 122, 255, 0.06) 58%, transparent);
+  animation: oc-sweep 6.5s cubic-bezier(0.45, 0, 0.2, 1) infinite;
 }
-@keyframes canvas-sweep {
-  from { transform: translateX(0); }
-  to { transform: translateX(680%); }
+@keyframes oc-sweep {
+  from { transform: translateX(0) skewX(-8deg); }
+  to { transform: translateX(820%) skewX(-8deg); }
 }
 
-/* golden micro-sparks for the ship moment */
+.oc-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  box-shadow: inset 0 0 140px 40px rgba(3, 4, 10, 0.62);
+}
+
+/* ————— HUD chrome ————— */
+
+.oc-hud {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 8.5px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: rgba(186, 190, 236, 0.8);
+  pointer-events: none;
+}
+.oc-hud-tl { top: 13px; left: 42px; }
+.oc-hud-tr { top: 10px; right: 42px; }
+.oc-hud-chip {
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 999px;
+  padding: 3px 9px;
+  background: rgba(14, 16, 36, 0.6);
+  backdrop-filter: blur(4px);
+  letter-spacing: 0.2em;
+}
+
+.oc-corner {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  pointer-events: none;
+  opacity: 0.55;
+}
+.oc-c-tl { top: 8px; left: 8px; border-top: 1px solid rgba(148, 150, 220, 0.6); border-left: 1px solid rgba(148, 150, 220, 0.6); }
+.oc-c-tr { top: 8px; right: 8px; border-top: 1px solid rgba(148, 150, 220, 0.6); border-right: 1px solid rgba(148, 150, 220, 0.6); }
+.oc-c-bl { bottom: 8px; left: 8px; border-bottom: 1px solid rgba(148, 150, 220, 0.6); border-left: 1px solid rgba(148, 150, 220, 0.6); }
+.oc-c-br { bottom: 8px; right: 8px; border-bottom: 1px solid rgba(148, 150, 220, 0.6); border-right: 1px solid rgba(148, 150, 220, 0.6); }
+
+/* ————— SVG connectors ————— */
+
+/* entrance draw-in for the static base paths */
+.oc-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: oc-draw 0.9s ease-out both;
+  animation-delay: var(--d, 0ms);
+}
+@keyframes oc-draw {
+  to { stroke-dashoffset: 0; }
+}
+/* the green seal flash along a finished connector */
+.oc-draw-done {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: oc-draw 0.7s ease-out 0.15s both;
+}
+/* marching dashes for active links */
+@keyframes oc-dash {
+  to { stroke-dashoffset: -24; }
+}
+
+/* ————— units: the bots ————— */
+
+.oc-unit {
+  position: absolute;
+  z-index: 10;
+  width: 0;
+  height: 0;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  animation: oc-boot 0.85s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--d, 0ms);
+}
+.oc-core { z-index: 12; animation-duration: 1s; }
+.oc-unit:hover { z-index: 45; }
+.oc-unit:focus-visible { outline: none; }
+.oc-unit:focus-visible .oc-pod {
+  outline: 2px solid var(--acc);
+  outline-offset: 3px;
+}
+@keyframes oc-boot {
+  0% { opacity: 0; transform: translate(-50%, -30%) translateZ(-220px) rotateX(30deg) scale(0.62); filter: blur(8px); }
+  100% { opacity: 1; transform: translate(-50%, -50%) translateZ(0) rotateX(0deg) scale(1); filter: blur(0); }
+}
+
+.oc-lift {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-style: preserve-3d;
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.oc-unit:hover .oc-lift,
+.oc-unit:focus-visible .oc-lift {
+  transform: translateY(-5px) translateZ(26px);
+}
+.oc-unit[data-state="failed"] .oc-lift {
+  animation: oc-shake 0.34s ease-in-out 3;
+}
+@keyframes oc-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2.5px); }
+  75% { transform: translateX(2.5px); }
+}
+
+.oc-bob {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-style: preserve-3d;
+  animation: oc-bob var(--bob, 4.6s) ease-in-out infinite;
+}
+@keyframes oc-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4.5px); }
+}
+
+/* state halo behind the pod — opacity-only pulse */
+.oc-halo {
+  position: absolute;
+  left: -46px;
+  top: -46px;
+  width: 92px;
+  height: 92px;
+  border-radius: 999px;
+  pointer-events: none;
+  background: radial-gradient(circle, var(--glow), transparent 66%);
+  animation: oc-breathe 3.4s ease-in-out infinite;
+}
+.oc-unit[data-state="idle"] .oc-halo { animation: none; opacity: 0.3; }
+@keyframes oc-breathe {
+  0%, 100% { opacity: 0.35; transform: scale(0.94); }
+  50% { opacity: 0.75; transform: scale(1.06); }
+}
+
+/* the pod — a layered dome that reads as a lit 3D shell */
+.oc-pod {
+  position: absolute;
+  left: -29px;
+  top: -29px;
+  width: 58px;
+  height: 58px;
+  border-radius: 44%;
+  background:
+    radial-gradient(circle at 31% 22%, rgba(255, 255, 255, 0.34), transparent 42%),
+    radial-gradient(circle at 72% 88%, rgba(4, 5, 14, 0.9), transparent 52%),
+    linear-gradient(155deg, #383b68 0%, #1c1e3e 46%, #0b0c1c 100%);
+  border: 1px solid var(--acc);
+  box-shadow:
+    inset 0 2px 5px rgba(255, 255, 255, 0.16),
+    inset 0 -9px 16px rgba(0, 0, 0, 0.6),
+    0 16px 30px -12px rgba(0, 0, 0, 0.9),
+    0 0 30px -4px var(--glow);
+  transform: rotateX(9deg);
+  transform-style: preserve-3d;
+  transition: border-color 0.4s, box-shadow 0.4s;
+}
+.oc-bot[data-state="idle"] .oc-pod { filter: saturate(0.55) brightness(0.82); }
+
+.oc-sheen {
+  position: absolute;
+  left: 16%;
+  top: 10%;
+  width: 34%;
+  height: 20%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0));
+  filter: blur(1px);
+  transform: rotate(-24deg);
+}
+
+/* the visor — a lit slit; a beam patrols it while the agent works */
+.oc-visor {
+  position: absolute;
+  left: 15%;
+  right: 15%;
+  top: 33%;
+  height: 18%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #04050d, #0d1130 78%);
+  box-shadow:
+    inset 0 1.5px 4px rgba(0, 0, 0, 0.95),
+    inset 0 -1px 2px rgba(255, 255, 255, 0.06),
+    0 0 12px -2px var(--glow);
+  overflow: hidden;
+}
+.oc-visor-beam {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 34%;
+  border-radius: 999px;
+  opacity: 0.3;
+  background: linear-gradient(90deg, transparent, var(--acc), transparent);
+}
+.oc-visor-live {
+  opacity: 0.95;
+  animation: oc-patrol 2.4s ease-in-out infinite;
+}
+@keyframes oc-patrol {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(400%); }
+}
+
+/* chest emblem */
+.oc-emblem {
+  position: absolute;
+  left: 50%;
+  top: 63%;
+  width: 13px;
+  height: 13px;
+  transform: translate(-50%, -50%);
+  color: var(--acc);
+  opacity: 0.9;
+}
+
+/* antenna + beacon */
+.oc-antenna {
+  position: absolute;
+  left: 50%;
+  top: -16px;
+  width: 1.5px;
+  height: 12px;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, var(--acc), transparent);
+}
+.oc-beacon {
+  position: absolute;
+  left: 50%;
+  top: -19px;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  transform: translateX(-50%);
+  background: var(--acc);
+  box-shadow: 0 0 8px 1px var(--glow);
+  animation: oc-beacon 2.2s ease-in-out infinite;
+}
+@keyframes oc-beacon {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+/* spinning targeting reticle while working */
+.oc-reticle {
+  position: absolute;
+  left: -38px;
+  top: -38px;
+  width: 76px;
+  height: 76px;
+  border-radius: 999px;
+  pointer-events: none;
+  border: 1.5px dashed var(--acc);
+  opacity: 0.8;
+  animation: oc-spin 7s linear infinite;
+}
+@keyframes oc-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* one-shot pulse rings when a bot boots up */
+.oc-pulse {
+  position: absolute;
+  left: -29px;
+  top: -29px;
+  width: 58px;
+  height: 58px;
+  border-radius: 999px;
+  pointer-events: none;
+  border: 1.5px solid var(--acc);
+  opacity: 0;
+  animation: oc-pulse 0.9s cubic-bezier(0.16, 1, 0.3, 1) 2 both;
+}
+@keyframes oc-pulse {
+  0% { opacity: 0.85; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.9); }
+}
+
+/* done seal */
+.oc-seal {
+  position: absolute;
+  right: -8px;
+  top: -6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #35d39a;
+  background: linear-gradient(160deg, rgba(53, 211, 154, 0.28), rgba(53, 211, 154, 0.12));
+  border: 1px solid rgba(53, 211, 154, 0.75);
+  box-shadow: 0 0 14px -2px rgba(53, 211, 154, 0.8);
+  animation: oc-pop 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.oc-seal svg { width: 11px; height: 11px; }
+@keyframes oc-pop {
+  0% { opacity: 0; transform: scale(0.3); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+/* grounding shadow under the pod */
+.oc-shadow {
+  position: absolute;
+  left: 50%;
+  top: 31px;
+  width: 52px;
+  height: 11px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: radial-gradient(50% 50% at 50% 50%, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0) 70%);
+  filter: blur(1px);
+}
+
+/* holo name plate — full status, never truncated away */
+.oc-plate {
+  position: absolute;
+  left: 50%;
+  top: 41px;
+  transform: translateX(-50%);
+  width: clamp(120px, 17.6cqw, 178px);
+  padding: 6px 9px 7px;
+  background: linear-gradient(180deg, rgba(21, 23, 48, 0.92), rgba(11, 12, 26, 0.88));
+  border: 1px solid rgba(148, 150, 220, 0.24);
+  border-radius: 3px;
+  clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px);
+  box-shadow: 0 10px 26px -12px rgba(0, 0, 0, 0.9), 0 0 20px -8px var(--glow);
+  backdrop-filter: blur(6px);
+  transition: border-color 0.4s, box-shadow 0.4s;
+  text-align: left;
+}
+.oc-plate::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--acc);
+  opacity: 0.75;
+}
+.oc-unit:hover .oc-plate { border-color: var(--acc); }
+.oc-bot[data-state="idle"] .oc-plate { opacity: 0.82; }
+
+.oc-plate-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.oc-plate-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--acc);
+  white-space: nowrap;
+}
+.oc-plate-badge {
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 107, 90, 0.4);
+  background: rgba(255, 107, 90, 0.12);
+  color: #ff8c7a;
+  border-radius: 999px;
+  padding: 1px 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.oc-plate-line {
+  margin-top: 3px;
+  min-height: 30px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9.5px;
+  line-height: 1.55;
+  color: rgba(196, 200, 236, 0.85);
+  overflow-wrap: anywhere;
+}
+.oc-unit[data-state="idle"] .oc-plate-line { color: rgba(150, 154, 196, 0.6); }
+
+/* ————— the orchestrator core ————— */
+
+.oc-core .oc-pod {
+  left: -47px;
+  top: -47px;
+  width: 94px;
+  height: 94px;
+  border-radius: 46%;
+  transform: rotateX(11deg);
+  box-shadow:
+    inset 0 3px 8px rgba(255, 255, 255, 0.18),
+    inset 0 -14px 24px rgba(0, 0, 0, 0.62),
+    0 22px 44px -14px rgba(0, 0, 0, 0.95),
+    0 0 44px -6px var(--glow);
+}
+.oc-core .oc-visor { left: 26%; right: 26%; top: 35%; height: 15%; }
+.oc-core .oc-emblem { width: 22px; height: 22px; top: 64%; }
+.oc-core .oc-halo { left: -72px; top: -72px; width: 144px; height: 144px; }
+.oc-core .oc-shadow { top: 52px; width: 86px; height: 16px; }
+.oc-core .oc-antenna { top: -20px; height: 14px; }
+.oc-core .oc-beacon { top: -24px; width: 5px; height: 5px; }
+.oc-reticle-core { left: -56px; top: -56px; width: 112px; height: 112px; }
+.oc-seal-core { right: -4px; top: -4px; width: 24px; height: 24px; }
+.oc-seal-core svg { width: 13px; height: 13px; }
+
+/* gyroscope rings — dashed, tilted, spinning on different axes */
+.oc-ring {
+  position: absolute;
+  border-radius: 999px;
+  pointer-events: none;
+  border: 1.5px dashed rgba(148, 146, 255, 0.45);
+}
+.oc-ring-a {
+  left: -62px;
+  top: -62px;
+  width: 124px;
+  height: 124px;
+  animation: oc-gyro-a 9s linear infinite;
+}
+.oc-ring-b {
+  left: -55px;
+  top: -55px;
+  width: 110px;
+  height: 110px;
+  border-color: rgba(56, 217, 240, 0.4);
+  animation: oc-gyro-b 13s linear infinite reverse;
+}
+@keyframes oc-gyro-a {
+  from { transform: rotateX(74deg) rotateZ(0deg); }
+  to { transform: rotateX(74deg) rotateZ(360deg); }
+}
+@keyframes oc-gyro-b {
+  from { transform: rotateY(74deg) rotateZ(0deg); }
+  to { transform: rotateY(74deg) rotateZ(360deg); }
+}
+
+/* spark drones circling the core */
+.oc-orbit-dot {
+  position: absolute;
+  left: -47px;
+  top: -47px;
+  width: 94px;
+  height: 94px;
+  border-radius: 999px;
+  pointer-events: none;
+  animation: oc-orbit-spin 6s linear infinite;
+}
+.oc-orbit-dot::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 999px;
+  background: #38d9f0;
+  box-shadow: 0 0 8px 2px rgba(56, 217, 240, 0.7);
+}
+.oc-orbit-dot-b {
+  left: -59px;
+  top: -59px;
+  width: 118px;
+  height: 118px;
+  animation-duration: 9.5s;
+  animation-direction: reverse;
+}
+.oc-orbit-dot-b::before {
+  width: 4px;
+  height: 4px;
+  background: #7c7aff;
+  box-shadow: 0 0 8px 2px rgba(124, 122, 255, 0.7);
+}
+@keyframes oc-orbit-spin {
+  to { transform: rotate(360deg); }
+}
+
+.oc-core .oc-plate {
+  top: 58px;
+  width: clamp(220px, 30cqw, 320px);
+}
+.oc-core-head { justify-content: center; }
+.oc-core-line {
+  -webkit-line-clamp: 2;
+  min-height: 30px;
+  text-align: center;
+}
+
+/* ————— the worker drone orbit ————— */
+
+.oc-orbit-track {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 184px;
+  height: 52px;
+  transform: translate(-50%, -50%);
+  border: 1px dashed rgba(124, 122, 255, 0.25);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.oc-worker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  will-change: transform, opacity;
+  pointer-events: none;
+}
+.oc-worker-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(124, 122, 255, 0.45);
+  background: linear-gradient(180deg, rgba(24, 26, 54, 0.95), rgba(14, 15, 34, 0.92));
+  color: #b9b7ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  box-shadow: 0 8px 20px -10px rgba(0, 0, 0, 0.95), 0 0 18px -6px rgba(124, 122, 255, 0.65);
+  backdrop-filter: blur(4px);
+}
+.oc-worker-done {
+  border-color: rgba(53, 211, 154, 0.5);
+  color: #5fe6b0;
+  box-shadow: 0 8px 20px -10px rgba(0, 0, 0, 0.95), 0 0 14px -6px rgba(53, 211, 154, 0.6);
+}
+.oc-worker-failed {
+  border-color: rgba(255, 107, 90, 0.5);
+  color: #ff9d8d;
+}
+
+/* ————— the meter ————— */
+
+.oc-meter-lock {
+  animation: oc-meter-lock 0.9s ease-out both;
+}
+@keyframes oc-meter-lock {
+  0% { filter: brightness(1); }
+  40% { filter: brightness(1.7); }
+  100% { filter: brightness(1.15); }
+}
+.oc-sweepbar {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.5), transparent);
+  animation: oc-sweepbar 1.4s linear infinite;
+}
+@keyframes oc-sweepbar {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+
+/* ————— reduced motion: everything settles to a calm, readable scene ————— */
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-unit,
+  .oc-lift,
+  .oc-bob,
+  .oc-halo,
+  .oc-reticle,
+  .oc-pulse,
+  .oc-seal,
+  .oc-beacon,
+  .oc-visor-live,
+  .oc-ring-a,
+  .oc-ring-b,
+  .oc-orbit-dot-a,
+  .oc-orbit-dot-b,
+  .oc-nebula,
+  .oc-stars-a,
+  .oc-stars-b,
+  .oc-stars-c,
+  .oc-shoot-a,
+  .oc-shoot-b,
+  .oc-floor,
+  .oc-scan::after,
+  .oc-meter-lock,
+  .oc-sweepbar {
+    animation: none !important;
+  }
+  .oc-unit {
+    opacity: 1 !important;
+    transform: translate(-50%, -50%) !important;
+    filter: none !important;
+  }
+  .oc-draw,
+  .oc-draw-done {
+    animation: none !important;
+    stroke-dasharray: none !important;
+    stroke-dashoffset: 0 !important;
+  }
+}
+
+/* ————— ship moments (shared with the completion takeover) ————— */
+
 @keyframes gold-rise {
   0% { opacity: 0; transform: translateY(6px) scale(0.6); }
   30% { opacity: 1; }
@@ -683,19 +1302,8 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .spawn-pop,
-  .node-glow,
-  .node-shake,
-  .core-breathe,
-  .sweep-once,
-  .meter-lock,
   .gold-spark,
-  .green-wave,
-  .worker-pulse,
-  .canvas-stars,
-  .canvas-stars-far,
-  .canvas-nebula,
-  .canvas-scan::after {
+  .green-wave {
     animation: none !important;
   }
 }
