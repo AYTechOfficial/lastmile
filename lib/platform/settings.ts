@@ -367,6 +367,25 @@ export async function resolveProviders(tier: ModelTier): Promise<ResolvedProvide
     .sort((a, b) => b.priority - a.priority);
 }
 
+/** The providers this tier CAN use but has no key for, by label.
+
+    `resolveProviders` drops them silently, which is right for the chain and
+    wrong for the operator: "why did it never try Groq / NVIDIA / Aion?" has no
+    answer anywhere in the run log, because the provider was never in the chain
+    to fail. This makes the absence reportable instead of invisible. */
+export async function unkeyedProviders(tier: ModelTier): Promise<string[]> {
+  const { providers } = await getPlatformData();
+  return providers
+    .filter((p) => p.enabled && p.tier === tier)
+    .filter((p) => {
+      const apiKey = p.keyEncrypted
+        ? decryptSecret(p.keyEncrypted) ?? ""
+        : (process.env[p.keyEnv ?? ""] ?? "").trim();
+      return apiKey.length === 0 || p.models.length === 0;
+    })
+    .map((p) => `${p.label} (no key${p.keyEnv ? ` — set ${p.keyEnv}` : ""})`);
+}
+
 /** The operator token for an infrastructure service, falling back to the
     environment. Returns null when neither is configured — callers decide
     whether that is fatal (deploy) or merely degraded (repo creation). */

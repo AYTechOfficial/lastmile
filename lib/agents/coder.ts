@@ -378,7 +378,7 @@ async function fanOutWorkers(
         agent: "code",
         preferred: input.preferredModel ?? defaultModelFor(input.plan.modelTier),
         timeoutMs: 240_000,
-        maxRungs: 6,
+        maxRungs: 10,
         onAttempt: async (attempt) => {
           if (!attempt.ok) {
             await input.emit("warn", `  worker [${pkg.label}] rung failed: ${attempt.detail ?? "unknown"}`);
@@ -487,7 +487,7 @@ async function askModel(
     preferred: input.preferredModel ?? defaultModelFor(input.plan.modelTier),
     /* Code generation is the longest call in the pipeline by a wide margin. */
     timeoutMs: 240_000,
-    maxRungs: 6,
+    maxRungs: 10,
     onAttempt: async (attempt) => {
       await input.emit(
         attempt.ok ? "success" : "warn",
@@ -919,7 +919,7 @@ export async function repairWithCompiler(
     agent: "code",
     preferred: input.preferredModel ?? defaultModelFor(input.plan.modelTier),
     timeoutMs: 240_000,
-    maxRungs: 6,
+    maxRungs: 10,
     onAttempt: async (a) => {
       await input.emit(
         a.ok ? "success" : "warn",

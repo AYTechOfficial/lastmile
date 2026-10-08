@@ -254,7 +254,7 @@ export async function runVerifier(input: VerifyInput): Promise<VerifyResult> {
       agent: "verify",
       preferred: input.preferredModel ?? defaultModelFor(input.plan.modelTier),
       timeoutMs: 120_000,
-      maxRungs: 6,
+      maxRungs: 10,
       onAttempt: async (attempt) => {
         if (!attempt.ok) return;
         await input.emit(

@@ -34,7 +34,7 @@ import {
   PREFERRED_FREE_MODEL,
   TRUE_MODEL_IDS,
 } from "./catalog";
-import { resolveProviders, type ResolvedProvider } from "../platform/settings";
+import { resolveProviders, unkeyedProviders, type ResolvedProvider } from "../platform/settings";
 import { activeUserProviders } from "../platform/user-providers";
 import type { AgentId } from "../platform/settings";
 import type { ModelTier } from "../plans";
@@ -445,6 +445,35 @@ async function callRung(
 
 /* ————————————————————————— the public call ————————————————————————— */
 
+/** Reorder the chain so every provider gets one attempt before any provider
+    gets a second.
+
+    This is the fix for a run whose log showed only two hosts while eight were
+    configured: the walk was provider-by-provider — two models of TrueModel,
+    then two of Google, then two of HCNSEC — so a six-rung budget was spent
+    inside the top three providers and Aion Labs, NVIDIA, Cerebras, OpenRouter
+    and Groq were never asked, however dead the first three were. Spreading the
+    first pass by provider makes those rungs real: if the leaders are down, the
+    chain lands on a host that can answer instead of reporting that everything
+    it tried failed.
+
+    The second pass keeps the original order, so a provider that carries a
+    second worth-trying model is still reached once every provider had a turn. */
+function spreadByProvider(rungs: Rung[]): Rung[] {
+  const first: Rung[] = [];
+  const rest: Rung[] = [];
+  const seen = new Set<string>();
+  for (const rung of rungs) {
+    if (seen.has(rung.id)) {
+      rest.push(rung);
+    } else {
+      seen.add(rung.id);
+      first.push(rung);
+    }
+  }
+  return [...first, ...rest];
+}
+
 export async function chat(input: ChatInput, messages: ChatMessage[]): Promise<ChatResult> {
   const started = Date.now();
   const attempts: ChatAttempt[] = [];
@@ -506,7 +535,11 @@ export async function chat(input: ChatInput, messages: ChatMessage[]): Promise<C
   const perProvider = new Map<string, number>();
   let lastDetail = "no rung answered";
 
-  for (const rung of ordered) {
+  /* One rung per provider, in priority order, before any provider's second. */
+  const queue = spreadByProvider(ordered);
+  const configured = new Set(ordered.map((r) => r.id)).size;
+
+  for (const rung of queue) {
     if (tried.length >= maxRungs) break;
 
     /* Skip a (provider, model) pair already tried: `orderModels` can place the
@@ -561,6 +594,18 @@ export async function chat(input: ChatInput, messages: ChatMessage[]): Promise<C
     lastDetail = `${rung.label}/${rung.model}: ${result.detail ?? "failed"}`;
   }
 
+  /* Which providers were actually asked, and which never made it into the
+     chain at all. "every model failed" without this reads as "the models are
+     down" even when the truth is "one provider was out of rungs and two had no
+     key" — the two failures look identical from the outside. */
+  const asked = [...new Set(attempts.map((a) => a.provider))];
+  const missing = await unkeyedProviders(input.tier).catch(() => []);
+  const reached =
+    asked.length < configured
+      ? ` (reached ${asked.length}/${configured} configured provider(s): ${asked.join(", ")})`
+      : "";
+  const unconfigured = missing.length > 0 ? ` — not configured: ${missing.join(", ")}` : "";
+
   return {
     ok: false,
     text: "",
@@ -570,7 +615,7 @@ export async function chat(input: ChatInput, messages: ChatMessage[]): Promise<C
     tokens: 0,
     elapsedMs: Date.now() - started,
     attempts,
-    reason: `every model in the chain failed — last was ${lastDetail}`,
+    reason: `every model in the chain failed${reached}${unconfigured} — last was ${lastDetail}`,
   };
 }
 
