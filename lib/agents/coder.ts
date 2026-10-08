@@ -390,7 +390,7 @@ Reply with ONLY a JSON object of the shape:
 STRICT RULES
 - Next.js App Router, TypeScript, client components ("use client") where the file renders UI.
 - Tailwind utility classes only.
-- Persistence: localStorage, key exactly "${key}" — the other screens read the same key, so the product works as one.
+- Persistence: through the harness helper "@/lib/persist" — readLocal<T>(key, fallback) and writeLocal(key, value). Never call localStorage directly: these screens are prerendered on the server, where localStorage does not exist, and a direct read during render is a build failure. Key exactly "${key}" — the other screens read the same key, so the product works as one.
 - Shared record type (match this exactly): type Record = { id: string; title: string; notes: string; createdAt: string }.
 - The shared kit already exists at "@/components/ui" — harness-owned, so you may import from it but never rewrite it. Its exact API:
     Button({ variant?: "primary" | "secondary" | "danger" | "outline" | "ghost" | "link", size?: "sm" | "md" | "lg", ...buttonProps })
@@ -466,10 +466,10 @@ function buildPrompt(input: CodeInput): string {
 STRICT RULES
 - Next.js App Router with TypeScript. Every page is a client component ("use client").
 - Styling: Tailwind utility classes only. No CSS modules, no styled-components.
-- Persistence: localStorage only. There is no backend and no database.
+- Persistence: localStorage only, reached through the harness helper "@/lib/persist" (readLocal<T>(key, fallback) / writeLocal(key, value)). There is no backend and no database. Never call localStorage directly — every screen is prerendered on the server, where localStorage does not exist, and a direct read during render is a build failure.
 - Write REAL content for this specific product. No lorem ipsum, no placeholders, no TODOs.
 - EVERY file must be COMPLETE from its first line to its last. A file that ends mid-function, mid-object or mid-JSX is a failed build. If you are running short on space, simplify styling and commentary — never stop before the file is finished and syntactically whole.
-- Do not create: package.json, tsconfig.json, next.config.mjs, postcss.config.mjs, app/layout.tsx, app/globals.css, components/ui.tsx. Those already exist and are correct — any file you return with those paths is discarded.
+- Do not create: package.json, tsconfig.json, next.config.mjs, postcss.config.mjs, app/layout.tsx, app/globals.css, components/ui.tsx, lib/persist.ts. Those already exist and are correct — any file you return with those paths is discarded.
 - Files you SHOULD write: app/page.tsx plus any routes in the spec, and components/ files for the parts that are reused.
 - The shared kit already exists at components/ui.tsx — import from "@/components/ui", never rewrite it. Its exact API:
     Button({ variant?: "primary" | "secondary" | "danger" | "outline" | "ghost" | "link", size?: "sm" | "md" | "lg", ...buttonProps })
@@ -576,7 +576,7 @@ function fixPrompt(
 
 Return the COMPLETE corrected contents of only the files that need changing — not a diff, not a fragment.
 A file that ends mid-function, mid-object or mid-JSX is a failed build — if space is tight, simplify styling, never cut logic.
-Do not create package.json, tsconfig.json, next.config.mjs, postcss.config.mjs, app/layout.tsx, app/globals.css or components/ui.tsx.
+Do not create package.json, tsconfig.json, next.config.mjs, postcss.config.mjs, app/layout.tsx, app/globals.css, components/ui.tsx or lib/persist.ts.
 Keep everything that already works; change only what the defects require.
 When the defect is a type mismatch, fix the type — never cast around it with "as X", and if the type belongs to another module, import it from there instead of declaring a second type with that name.
 ${input.issuesText ? `
@@ -604,6 +604,9 @@ Badge({ tone?: "brand" | "pass" | "warn" | "bad" | "neutral" })
 EmptyState({ title?, message?, description?, icon?, action?, className? })
 ListRow({ record?, title?, subtitle?, trailing?, className? })
 `}
+STORAGE ("@/lib/persist" is harness-owned — import it, never rewrite it, never touch localStorage directly)
+readLocal<T>(key: string, fallback: T): T   — returns the fallback on the server, where localStorage does not exist
+writeLocal(key: string, value: unknown): void
 MASTER BUILD PROMPT (the contract the code is held to)
 ${input.master?.instructions ?? input.sentence}`;
 }
@@ -611,7 +614,7 @@ ${input.master?.instructions ?? input.sentence}`;
 /* ————————————————————————— validation ————————————————————————— */
 
 const ALLOWED_EXT = /\.(tsx|ts|jsx|js|css|json|md)$/i;
-const FORBIDDEN = /(^|\/)(package\.json|package-lock\.json|tsconfig\.json|next\.config\.[a-z]+|postcss\.config\.[a-z]+|app\/layout\.tsx|app\/globals\.css|components\/ui\.tsx)$/i;
+const FORBIDDEN = /(^|\/)(package\.json|package-lock\.json|tsconfig\.json|next\.config\.[a-z]+|postcss\.config\.[a-z]+|app\/layout\.tsx|app\/globals\.css|components\/ui\.tsx|lib\/persist\.ts)$/i;
 
 /** Keep only files this agent is allowed to write. A model that returns a
     package.json would otherwise overwrite the scaffold and break the build —
@@ -667,7 +670,7 @@ function isScaffold(path: string): boolean {
 
 const SELF_CHECK_REPAIRS = 2;
 const INSTALL_TIMEOUT_MS = 300_000;
-const TSC_TIMEOUT_MS = 180_000;
+const BUILD_TIMEOUT_MS = 300_000;
 const MAX_REPORTED_ERRORS = 6_000;
 
 type CommandResult = { code: number; out: string };
@@ -709,10 +712,17 @@ async function writeProject(dir: string, files: GeneratedFile[]): Promise<void> 
   }
 }
 
-/** The first real compiler line — the rest of a tsc report is noise in a run log. */
+/** The first line worth showing: the compiler's diagnostic when there is one,
+    otherwise the build's own complaint. A wall of output is noise in a run log. */
 function firstErrorLine(errors: string): string {
-  const line = errors.split("\n").find((l) => /error TS\d+/.test(l)) ?? errors.split("\n")[0] ?? "";
-  return line.trim().slice(0, 300);
+  const lines = errors.split("\n").map((l) => l.trim()).filter(Boolean);
+  const line =
+    lines.find((l) => /error TS\d+/.test(l)) ??
+    lines.find((l) => /error:/i.test(l)) ??
+    lines.find((l) => /error|failed/i.test(l)) ??
+    lines[0] ??
+    "";
+  return line.slice(0, 300);
 }
 
 /** The repair's files replace their paths in the project; nothing else moves. */
@@ -735,7 +745,7 @@ export async function compileGate(
 
   try {
     await writeProject(dir, files);
-    await input.emit("info", "-> self-check: installing the merged project and type-checking it before the commit");
+    await input.emit("info", "-> self-check: installing the merged project and running its real build before the commit");
 
     const npm = process.platform === "win32" ? "npm.cmd" : "npm";
     const install = await runCommand(
@@ -750,19 +760,18 @@ export async function compileGate(
       return { files, tokens };
     }
 
-    const typecheck = () =>
-      runCommand(
-        process.execPath,
-        [path.join("node_modules", "typescript", "bin", "tsc"), "--noEmit", "-p", "tsconfig.json"],
-        dir,
-        TSC_TIMEOUT_MS,
-      );
+    /* The check is the verifier's own command — the project's real build — not
+       a bare type check. A screen that reads localStorage while rendering
+       type-checks perfectly and then dies while prerendering; only the build
+       sees that. What passes here is what the verifier will see. */
+    const build = () =>
+      runCommand(npm, ["run", "build"], dir, BUILD_TIMEOUT_MS, process.platform === "win32");
 
-    let check = await typecheck();
+    let check = await build();
     if (check.code === 0) {
       await input.emit(
         "success",
-        `self-check passed — the merged project type-checks clean (${Math.round((Date.now() - started) / 1000)}s)`,
+        `self-check passed — the merged project builds clean (${Math.round((Date.now() - started) / 1000)}s)`,
       );
       return { files, tokens };
     }
@@ -783,12 +792,12 @@ export async function compileGate(
 
       current = mergeRepairs(current, repaired.files);
       await writeProject(dir, repaired.files);
-      check = await typecheck();
+      check = await build();
 
       if (check.code === 0) {
         await input.emit(
           "success",
-          `-> compiler repair ${attempt}/${SELF_CHECK_REPAIRS} cleared it — the project type-checks clean`,
+          `-> compiler repair ${attempt}/${SELF_CHECK_REPAIRS} cleared it — the project builds clean`,
         );
         return { files: current, tokens };
       }
@@ -866,7 +875,7 @@ RULES
 - Return complete files only. A file that ends mid-function, mid-object or mid-JSX is another failed build — if space is tight, simplify styling, never cut logic.
 - Two different declarations that share one name are printed as that single name (a mismatch often reads as "MatchHistory | MatchHistory"). When a value is rejected — at a setState boundary, say — check whether the type really lives in another file: if it does, delete the local declaration and import that type instead, and do not silence it with "as X".
 - Keep everything that already works; change only what the errors require.
-- Do not create package.json, tsconfig.json, next.config.mjs, postcss.config.mjs, app/layout.tsx, app/globals.css or components/ui.tsx.`;
+- Do not create package.json, tsconfig.json, next.config.mjs, postcss.config.mjs, app/layout.tsx, app/globals.css, components/ui.tsx or lib/persist.ts.`;
 
   const { value, result } = await chatJson<{ files?: GeneratedFile[] }>(chatInput, [
     {
@@ -882,6 +891,38 @@ RULES
 }
 
 /* ————————————————————————— the scaffold ————————————————————————— */
+
+/** Storage access that is safe during the server render, written by the harness
+    rather than by a model.
+
+    Every product this pipeline builds persists to localStorage, and every
+    screen prerenders during the build — where localStorage does not exist. The
+    obvious model-written line, useState(() => localStorage.getItem(key)), type
+    checks perfectly and then fails the build while prerendering that page. The
+    helper exists so the safe path is also the easy one: the model is told its
+    exact API instead of being trusted to remember why render is not a browser. */
+const PERSIST_HELPER = `/* localStorage, safe on the server. Prerendering happens without a browser, so
+   a direct read during render fails the build — everything goes through here. */
+
+export function readLocal<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function writeLocal(key: string, value: unknown): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* storage full or blocked — losing a cache must never break a screen */
+  }
+}
+`;
 
 /** The shared kit, written by the harness rather than by a model. */
 const UI_KIT = `/* The shared UI kit — harness-owned, like the scaffold around it.
@@ -1108,6 +1149,13 @@ function scaffold(input: CodeInput): GeneratedFile[] {
          project every file can import without asking. */
       path: "components/ui.tsx",
       content: UI_KIT,
+    },
+    {
+      /* The safe storage read. Harness-owned for the same reason the kit is:
+         one file every worker can import without negotiating, and no way for a
+         screen to touch localStorage during the server render. */
+      path: "lib/persist.ts",
+      content: PERSIST_HELPER,
     },
   ];
 }
