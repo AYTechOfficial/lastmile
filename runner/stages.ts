@@ -222,6 +222,21 @@ const code: StageExecutor = async (ctx) => {
     };
   }
 
+  /* The round landed and the project still builds, so the defects it was
+     answering are closed. A fix that did not actually clear one is re-reported
+     by the next verify as a fresh open issue; without this the ledger
+     accumulates stale rows and every later round re-reads defects that were
+     repaired rounds ago. A round whose self-check could not clear the build
+     closes nothing — the verifier is about to say so. */
+  const answered = Array.isArray(ctx.payload.issueIds) ? (ctx.payload.issueIds as string[]) : [];
+  if (result.buildClean && answered.length > 0) {
+    const { markFixed } = await import("../lib/pipeline/issues");
+    const closed = await markFixed(ctx.run.id, answered);
+    if (closed > 0) {
+      await ctx.emit("info", `-> closed ${closed} defect(s) this round answered — the next verify reports what is still real`);
+    }
+  }
+
   await ctx.emit(
     "info",
     `code finished in ${Math.round((Date.now() - started) / 1000)}s · ${result.files.length} file(s) · ${result.generated ? "model-written" : "scaffold only"}`,
@@ -274,12 +289,13 @@ const verify: StageExecutor = async (ctx) => {
     heartbeat: ctx.heartbeat,
   });
 
-  /* Only critical defects block shipping. Majors stay in the ledger for the
-     user and the next fix round, but a build that compiles, serves its routes
-     and scores well must reach a URL — the previous rule counted every major
-     as blocking, which burned the loop budget on advisories and finished runs
-     without ever deploying them. */
+  /* Only critical defects block shipping outright. Majors are repaired while
+     the loop has rounds left (the state machine decides), and when the budget is
+     spent the build that compiles, serves its routes and scores well must still
+     reach a URL — the earlier rule counted every major as blocking, which burned
+     the loop budget on advisories and finished runs without ever deploying them. */
   const critical = result.issues.filter((i) => i.severity === "critical").length;
+  const majors = result.issues.filter((i) => i.severity === "major").length;
   const recorded = await recordIssues(ctx.run.id, ctx.iteration, "verify", result.issues);
 
   if (ctx.repo) {
@@ -291,7 +307,7 @@ const verify: StageExecutor = async (ctx) => {
 
   await ctx.emit(
     "info",
-    `verify finished in ${Math.round((Date.now() - started) / 1000)}s · ${recorded.total} issue(s), ${critical} blocking · score ${result.score}/100`,
+    `verify finished in ${Math.round((Date.now() - started) / 1000)}s · ${recorded.total} issue(s), ${critical} critical, ${majors} major · score ${result.score}/100`,
   );
 
   if (!result.ok) {
@@ -299,6 +315,7 @@ const verify: StageExecutor = async (ctx) => {
       ok: false,
       issues: recorded.total,
       blocking: critical,
+      majors,
       reason: result.reason ?? "the verifier could not run",
       tokens: result.tokens,
     };
@@ -308,6 +325,7 @@ const verify: StageExecutor = async (ctx) => {
     ok: true,
     issues: recorded.total,
     blocking: critical,
+    majors,
     verifyScore: result.score,
     tokens: result.tokens,
   };

@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
 import { runIssues } from "../schema";
 import type { Severity } from "../domain";
@@ -57,13 +57,15 @@ export async function recordIssues(
   };
 }
 
-/** Everything still open for a run, oldest first. */
+/** Everything still open for a run, newest first — the findings a fix round
+    must answer are the ones the last stage reported, not the ones from rounds
+    ago that nobody managed to reproduce. */
 export async function openIssues(runId: string): Promise<RunIssue[]> {
   const rows = await db
     .select()
     .from(runIssues)
     .where(and(eq(runIssues.runId, runId), eq(runIssues.status, "open")))
-    .orderBy(asc(runIssues.createdAt));
+    .orderBy(desc(runIssues.createdAt));
 
   return rows.map((r) => ({
     id: r.id,

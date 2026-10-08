@@ -71,6 +71,9 @@ export type CodeResult = {
   tokens: number;
   /** true when the code came from the model, false when it is the fallback */
   generated: boolean;
+  /** true only when the self-check saw the merged project build clean, so a
+      caller can treat "this round landed" as "the defects are actually gone" */
+  buildClean: boolean;
   reason?: string;
 };
 
@@ -96,6 +99,7 @@ export async function runCoder(input: CodeInput): Promise<CodeResult> {
       files: [],
       tokens: 0,
       generated: false,
+      buildClean: false,
       reason: "no GitHub account is configured, so there is nowhere to commit the generated code",
     };
   }
@@ -113,6 +117,7 @@ export async function runCoder(input: CodeInput): Promise<CodeResult> {
         files: [],
         tokens: 0,
         generated: false,
+        buildClean: false,
         reason: created.detail ?? `could not create ${owner}/${name}`,
       };
     }
@@ -207,6 +212,7 @@ export async function runCoder(input: CodeInput): Promise<CodeResult> {
   const gate = await compileGate(input, files, projectFiles);
   files = gate.files;
   tokens += gate.tokens;
+  const buildClean = gate.cleared;
 
   await input.heartbeat();
 
@@ -230,6 +236,7 @@ export async function runCoder(input: CodeInput): Promise<CodeResult> {
       files: files.map((f) => f.path),
       tokens,
       generated: generated.ok,
+      buildClean,
       reason: commit.detail ?? "the commit failed",
     };
   }
@@ -245,6 +252,7 @@ export async function runCoder(input: CodeInput): Promise<CodeResult> {
     files: files.map((f) => f.path),
     tokens,
     generated: generated.ok,
+    buildClean,
     reason: generated.ok ? undefined : reason,
   };
 }
@@ -443,7 +451,7 @@ STRICT RULES
 - Next.js App Router, TypeScript, client components ("use client") where the file renders UI.
 - Tailwind utility classes only.
 - Persistence: through the harness helper "@/lib/persist" — readLocal<T>(key, fallback) and writeLocal(key, value). Never call localStorage directly: these screens are prerendered on the server, where localStorage does not exist, and a direct read during render is a build failure. Key exactly "${key}" — the other screens read the same key, so the product works as one.
-- Shared record type (match this exactly): type Record = { id: string; title: string; notes: string; createdAt: string }.
+- Shared record type (match this exactly): type RecordItem = { id: string; title: string; notes: string; createdAt: string }. Never declare a type named Record — that name belongs to TypeScript's own utility type and redeclaring it breaks every file that uses it.
 - The shared kit already exists at "@/components/ui" — harness-owned, so you may import from it but never rewrite it. Its exact API:
     Button({ variant?: "primary" | "secondary" | "danger" | "outline" | "ghost" | "link", size?: "sm" | "md" | "lg", ...buttonProps })
     Card({ className?, ...divProps })
@@ -454,6 +462,7 @@ STRICT RULES
 - Shared types are contracts: declare each one in ONE file and import it everywhere else. Never declare a type whose name another module already exports — two same-named declarations with different shapes are accepted file by file and rejected when the files are merged, and the compiler prints both as the same name.
 - Any other shared piece goes in "components/widgets.tsx" (your file) and must not re-export or shadow the kit's names.
 - Write REAL content for this specific product. No lorem ipsum, no placeholders, no TODOs.
+- Every overlay, modal, panel and section you render must be REACHABLE in some state. Never gate one on a value the same update clears away — a queue timer that sets phase: "playing" turns a match modal rendered only when phase === "queue" into dead code — and never ship a section with a hardcoded "hidden" class. Before you finish, walk every screen's states and check each condition can actually become true.
 - Do not create any file not listed above.
 - Escape all newlines inside "content" correctly so the JSON parses.
 
@@ -520,6 +529,7 @@ STRICT RULES
 - Styling: Tailwind utility classes only. No CSS modules, no styled-components.
 - Persistence: localStorage only, reached through the harness helper "@/lib/persist" (readLocal<T>(key, fallback) / writeLocal(key, value)). There is no backend and no database. Never call localStorage directly — every screen is prerendered on the server, where localStorage does not exist, and a direct read during render is a build failure.
 - Write REAL content for this specific product. No lorem ipsum, no placeholders, no TODOs.
+- Every overlay, modal, panel and section you render must be REACHABLE in some state. Never gate one on a value the same update clears away — a queue timer that sets phase: "playing" turns a match modal rendered only when phase === "queue" into dead code — and never ship a section with a hardcoded "hidden" class. Before you finish, walk every screen's states and check each condition can actually become true.
 - EVERY file must be COMPLETE from its first line to its last. A file that ends mid-function, mid-object or mid-JSX is a failed build. If you are running short on space, simplify styling and commentary — never stop before the file is finished and syntactically whole.
 - Do not create: package.json, tsconfig.json, next.config.mjs, postcss.config.mjs, app/layout.tsx, app/globals.css, components/ui.tsx, lib/persist.ts. Those already exist and are correct — any file you return with those paths is discarded.
 - Files you SHOULD write: app/page.tsx plus any routes in the spec, and components/ files for the parts that are reused.
@@ -630,6 +640,7 @@ Return the COMPLETE corrected contents of only the files that need changing — 
 A file that ends mid-function, mid-object or mid-JSX is a failed build — if space is tight, simplify styling, never cut logic.
 Do not create package.json, tsconfig.json, next.config.mjs, postcss.config.mjs, app/layout.tsx, app/globals.css, components/ui.tsx or lib/persist.ts.
 Keep everything that already works; change only what the defects require.
+When a screen is unreachable, fix the state transition that makes it unreachable — never delete the screen, and never leave it gated on the state the same update replaces.
 When the defect is a type mismatch, fix the type — never cast around it with "as X", and if the type belongs to another module, import it from there instead of declaring a second type with that name.
 ${input.issuesText ? `
 OPEN DEFECTS (the verifier's ledger — severity, the exact diagnostics, the files it names)
@@ -791,7 +802,7 @@ export async function compileGate(
   input: CodeInput,
   changed: GeneratedFile[],
   project: GeneratedFile[],
-): Promise<{ files: GeneratedFile[]; tokens: number }> {
+): Promise<{ files: GeneratedFile[]; tokens: number; cleared: boolean }> {
   let tokens = 0;
   let currentProject = project;
   const started = Date.now();
@@ -811,7 +822,9 @@ export async function compileGate(
     );
     if (install.code !== 0) {
       await input.emit("warn", `self-check skipped — the sandbox install failed (${install.out.trim().slice(0, 200)})`);
-      return { files: changed, tokens };
+      /* Unknown is not clean: a caller must not read "the round landed" as
+         "the defects are gone" when nothing was actually checked. */
+      return { files: changed, tokens, cleared: false };
     }
 
     /* The check is the verifier's own command — the project's real build — not
@@ -827,7 +840,7 @@ export async function compileGate(
         "success",
         `self-check passed — the merged project builds clean (${Math.round((Date.now() - started) / 1000)}s)`,
       );
-      return { files: changed, tokens };
+      return { files: changed, tokens, cleared: true };
     }
 
     let errors = check.out.trim().slice(0, MAX_REPORTED_ERRORS);
@@ -854,7 +867,7 @@ export async function compileGate(
           "success",
           `-> build repair ${attempt}/${SELF_CHECK_REPAIRS} cleared it — the project builds clean`,
         );
-        return { files: current, tokens };
+        return { files: current, tokens, cleared: true };
       }
 
       errors = check.out.trim().slice(0, MAX_REPORTED_ERRORS);
@@ -867,13 +880,13 @@ export async function compileGate(
       "warn",
       `self-check could not clear the build in ${SELF_CHECK_REPAIRS} repair round(s) — committing the real state so the verifier reports it`,
     );
-    return { files: current, tokens };
+    return { files: current, tokens, cleared: false };
   } catch (error) {
     await input.emit(
       "warn",
       `self-check could not run (${error instanceof Error ? error.message : String(error)}) — committing without it`,
     );
-    return { files: changed, tokens };
+    return { files: changed, tokens, cleared: false };
   } finally {
     await rm(dir, { recursive: true, force: true, maxRetries: 2 }).catch(() => {});
   }
@@ -1256,12 +1269,12 @@ import { useEffect, useState } from "react";
    spec; the screens are deliberately plain so the result is honest about how it
    was made. */
 
-type Record = { id: string; title: string; notes: string; createdAt: string };
+type RecordItem = { id: string; title: string; notes: string; createdAt: string };
 
 const KEY = ${JSON.stringify(`lastmile:${input.slug}:${table}`)};
 
 export default function Page() {
-  const [records, setRecords] = useState<Record[]>([]);
+  const [records, setRecords] = useState<RecordItem[]>([]);
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [ready, setReady] = useState(false);
@@ -1269,7 +1282,7 @@ export default function Page() {
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(KEY);
-      if (raw) setRecords(JSON.parse(raw) as Record[]);
+      if (raw) setRecords(JSON.parse(raw) as RecordItem[]);
     } catch {
       /* a corrupt value must not break the first render */
     }

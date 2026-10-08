@@ -82,6 +82,9 @@ export type StageOutcome = {
   issues: number;
   /** defects that must be fixed before shipping */
   blocking: number;
+  /** real defects that are not fatal — repaired while the loop has rounds
+      left, shipped only when it does not */
+  majors?: number;
   /** the reason a stage failed outright, if it did */
   reason?: string;
   liveUrl?: string | null;
@@ -144,6 +147,26 @@ export function advance(
           payload: { fixOnly: true, from: "verify" },
         };
       }
+
+      /* Majors are real defects, not advisories: the reviewer named the screen
+         and the state that makes it unreachable, and the file to open. Shipping
+         past one docks the run's score and hands the user a product the pipeline
+         already knew was wrong — it recorded the defect, deployed anyway, and
+         never spent a round on the repair.
+
+         So majors ride the loop exactly as criticals do, with the one difference
+         that keeps the "every run reaches a URL" rule: when the budget is spent
+         they stop blocking and the run deploys, leaving the open defects in the
+         ledger where the user can see them. */
+      if ((outcome.majors ?? 0) > 0 && roundsUsed < plan.maxIterations) {
+        return {
+          type: "enqueue",
+          kind: "code",
+          iteration: iteration + 1,
+          payload: { fixOnly: true, from: "verify" },
+        };
+      }
+
       return { type: "enqueue", kind: "deploy", iteration };
     }
 

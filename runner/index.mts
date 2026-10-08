@@ -265,6 +265,11 @@ async function main(): Promise<void> {
        guess it gets wrong costs a whole round of the budget. */
     const open = await openIssues(run.id);
     payload.files = filesToRepatch(open);
+    /* The exact rows this round is answering. When the round lands, they are
+       closed — otherwise every later round re-reads defects that were already
+       repaired, and the dashboard keeps showing open issues for a run that
+       fixed them. Whatever is still real comes back from the next verify. */
+    payload.issueIds = open.map((i) => i.id);
     payload.issuesText = open
       .slice(0, 12)
       .map(
