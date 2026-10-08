@@ -59,6 +59,12 @@ export const users = app.table("user", {
   /** verified Vercel username, shown in Settings after connecting */
   vercelAccount: text("vercel_account"),
 
+  /** Set by an operator to block an account: sign-in is refused, and a run that
+      is already queued is not started. Null means good standing — the absence
+      of a suspension is the normal state, so this is a timestamp rather than a
+      boolean and it records when an operator made the call. */
+  suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

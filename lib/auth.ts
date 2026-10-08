@@ -55,12 +55,21 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
             image: users.image,
             passwordHash: users.passwordHash,
             plan: users.plan,
+            suspendedAt: users.suspendedAt,
           })
           .from(users)
           .where(eq(users.email, email))
           .limit(1);
 
         if (!user?.passwordHash) return null;
+
+        /* An operator can block an account, and a block that only hides pages
+           is theatre: the password is still checked, but the session is never
+           issued. The message says "suspended" rather than "wrong password" so
+           a blocked person is not sent hunting for a typo that does not exist. */
+        if (user.suspendedAt) {
+          throw new Error("This account is suspended. Contact the operator if you think that is wrong.");
+        }
 
         const ok = await bcrypt.compare(password, user.passwordHash);
         if (!ok) return null;
@@ -70,6 +79,19 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
     }),
   ],
   callbacks: {
+    /* The credentials path checks the block itself (it has to, to give an
+       honest message); this covers the OAuth path, where the adapter would
+       otherwise sign a suspended person straight back in. */
+    async signIn({ user }) {
+      const email = user?.email?.trim().toLowerCase();
+      if (!email) return true;
+      const [row] = await db
+        .select({ suspendedAt: users.suspendedAt })
+        .from(users)
+        .where(eq(users.email, email))
+        .limit(1);
+      return !row?.suspendedAt;
+    },
     jwt({ token, user, trigger, session }) {
       if (user?.id) token.uid = user.id;
       /* Profile edits (name / email / avatar) update the signed-in session in

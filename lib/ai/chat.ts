@@ -270,6 +270,7 @@ async function callOpenAi(
   messages: ChatMessage[],
   signal: AbortSignal,
   json: boolean,
+  maxTokens = 16_384,
 ): Promise<DialectResult> {
   const res = await fetch(`${rung.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
     method: "POST",
@@ -285,8 +286,9 @@ async function callOpenAi(
       temperature: 0.2,
       /* Room for a full page component: the coder writes complete files inside
          a JSON envelope, and a tight default cap truncates the last file
-         mid-expression — which then fails the build it was meant to pass. */
-      max_tokens: 16_384,
+         mid-expression — which then fails the build it was meant to pass. A
+         probe overrides it: a health check wants one word back, not a page. */
+      max_tokens: maxTokens,
       ...(json ? { response_format: { type: "json_object" } } : {}),
     }),
     signal,
@@ -317,6 +319,7 @@ async function callAnthropic(
   rung: Rung,
   messages: ChatMessage[],
   signal: AbortSignal,
+  maxTokens = 16_384,
 ): Promise<DialectResult> {
   /* The Anthropic shape has no system role in the message list — the system
      prompt is a top-level field. Splitting it here is what lets one caller send
@@ -338,7 +341,7 @@ async function callAnthropic(
       model: rung.model,
       /* Same reasoning as the OpenAI dialect: the coder ships whole files, so
          the cap must leave room for a complete page component and its JSON. */
-      max_tokens: 16_384,
+      max_tokens: maxTokens,
       temperature: 0.2,
       ...(system ? { system } : {}),
       messages: rest,
@@ -395,6 +398,7 @@ async function callRung(
   messages: ChatMessage[],
   timeoutMs: number,
   json: boolean,
+  maxTokens = 16_384,
 ): Promise<DialectResult> {
   const key = rung.baseUrl.replace(/\/+$/, "");
   const remembered = dialectCache.get(key);
@@ -409,8 +413,8 @@ async function callRung(
     try {
       const result =
         dialect === "openai"
-          ? await callOpenAi(rung, messages, signal, json)
-          : await callAnthropic(rung, messages, signal);
+          ? await callOpenAi(rung, messages, signal, json, maxTokens)
+          : await callAnthropic(rung, messages, signal, maxTokens);
 
       if (result.ok) {
         dialectCache.set(key, dialect);
@@ -616,6 +620,54 @@ export async function chat(input: ChatInput, messages: ChatMessage[]): Promise<C
     elapsedMs: Date.now() - started,
     attempts,
     reason: `every model in the chain failed${reached}${unconfigured} — last was ${lastDetail}`,
+  };
+}
+
+/* ————————————————————————— health probes ————————————————————————— */
+
+export type ProbeResult = {
+  ok: boolean;
+  status: number;
+  ms: number;
+  tokens: number;
+  detail?: string;
+};
+
+/** Ask one provider whether one model answers, and how fast.
+
+    Deliberately not `chat()`: this is the operator's Test button, so it must
+    probe the provider it was told to probe — even one that is disabled, lowest
+    priority, or currently in cooldown — and it must not teach the chain
+    anything. A health check that quietly walked the whole failover chain would
+    report the chain's best model under every provider's name. */
+export async function probeModel(
+  provider: { id: string; label: string; baseUrl: string; apiKey: string },
+  model: string,
+  timeoutMs = 20_000,
+): Promise<ProbeResult> {
+  const rung: Rung = {
+    id: provider.id,
+    label: provider.label,
+    baseUrl: provider.baseUrl,
+    apiKey: provider.apiKey,
+    model,
+    rank: 0,
+  };
+  const started = Date.now();
+  const result = await callRung(
+    rung,
+    [{ role: "user", content: "Reply with the single word OK and nothing else." }],
+    timeoutMs,
+    false,
+    /* One word back: a probe must not pay for a completion the size of a page. */
+    16,
+  );
+  return {
+    ok: result.ok,
+    status: result.status,
+    ms: Date.now() - started,
+    tokens: result.tokens,
+    detail: result.ok ? undefined : (result.detail ?? `HTTP ${result.status}`),
   };
 }
 

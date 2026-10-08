@@ -56,10 +56,16 @@ export async function createRunAction(
   }
 
   const [user] = await db
-    .select({ plan: users.plan })
+    .select({ plan: users.plan, suspendedAt: users.suspendedAt })
     .from(users)
     .where(eq(users.id, session.user.id))
     .limit(1);
+
+  /* A suspended account cannot start work. Checked here as well as at sign-in:
+     a block should end the spending, not just the browsing. */
+  if (user?.suspendedAt) {
+    return { error: "This account is suspended, so new runs are on hold. An operator can lift it." };
+  }
 
   const tier = planOf(user?.plan);
 

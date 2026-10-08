@@ -63,8 +63,34 @@ export type InfraEntry = {
   vercelTeamId: string | null;
 };
 
+/** One model's last health probe. Written by the admin Test button, read by
+    the panel and by auto-arrange — nothing in the pipeline's hot path depends
+    on it, so a stale result is a display problem and never a run problem. */
+export type ModelHealth = {
+  ok: boolean;
+  /** round-trip time of the probe that produced this result */
+  ms: number;
+  status: number;
+  detail?: string;
+  /** when the probe ran, ISO */
+  at: string;
+};
+
+export type ProviderHealth = {
+  /** when the provider was last probed */
+  at: string;
+  /** per model id — the exact model that answered, not a summary */
+  models: Record<string, ModelHealth>;
+  /** fastest successful model's latency, null when every model failed */
+  best: number | null;
+};
+
+export type CatalogHealth = Record<string, ProviderHealth>;
+
 export type PlatformData = {
   providers: ProviderEntry[];
+  /** what the last Test found, keyed by provider id */
+  health?: CatalogHealth;
   infra: InfraEntry;
   /** which tier each plan routes to — the operator's switch */
   policy: Record<PlanId, ModelTier>;
@@ -220,6 +246,7 @@ const ENV_DEFAULTS: ProviderEntry[] = [
 function defaults(): PlatformData {
   return {
     providers: ENV_DEFAULTS,
+    health: {},
     infra: {
       githubTokenEncrypted: null,
       vercelTokenEncrypted: null,
@@ -282,6 +309,7 @@ function mergeWithDefaults(stored: Partial<PlatformData>): PlatformData {
         : base.providers,
     infra: { ...base.infra, ...(stored.infra ?? {}) },
     policy: { ...base.policy, ...(stored.policy ?? {}) },
+    health: stored.health ?? {},
     credits: {
       ...base.credits,
       ...(stored.credits ?? {}),
