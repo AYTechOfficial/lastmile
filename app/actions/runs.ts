@@ -458,29 +458,36 @@ export async function continueRunAction(
 
   const variant = run.specVariant + 1;
 
+  /* A continue cycle is a NEW cycle of work: it gets its own quality-loop
+     budget. Without this the runner would compute iteration = spent + 1 and
+     the first verify would fail the run for exceeding a budget that belonged
+     to the last ship. Honest, not a softener — this round still has to earn
+     its own clean verify. */
+  const reset = { iterations: 0, error: null, killRequested: false, completedAt: null };
+
   if (plan.pipeline === "research") {
     await db
       .update(runs)
-      .set({ status: "queued", currentStage: "research", error: null, killRequested: false, specVariant: variant, approvedAt: null, completedAt: null })
+      .set({ ...reset, status: "queued", currentStage: "research", specVariant: variant, approvedAt: null })
       .where(eq(runs.id, run.id));
     const job = await enqueue({ runId: run.id, kind: "research", payload: { continueRequest: request }, priority: 5 });
     await dispatchRunner({ jobId: job.id });
   } else if (plan.pipeline === "prompt") {
     await db
       .update(runs)
-      .set({ status: "queued", currentStage: "prompt", specVariant: variant, approvedAt: null, completedAt: null, error: null, killRequested: false })
+      .set({ ...reset, status: "queued", currentStage: "prompt", specVariant: variant, approvedAt: null })
       .where(eq(runs.id, run.id));
     const job = await enqueue({ runId: run.id, kind: "prompt", payload: { variant, guidance: request, continueRequest: true }, priority: 5 });
     await dispatchRunner({ jobId: job.id });
   } else if (plan.pipeline === "code") {
     await db
       .update(runs)
-      .set({ status: "queued", currentStage: "code", error: null, killRequested: false, approvedAt: run.approvedAt, completedAt: null })
+      .set({ ...reset, status: "queued", currentStage: "code", approvedAt: run.approvedAt })
       .where(eq(runs.id, run.id));
     const job = await enqueue({
       runId: run.id,
       kind: "code",
-      payload: { fixOnly: true, from: "continue", continueRequest: request, iteration: run.iterations + 1 },
+      payload: { fixOnly: true, from: "continue", continueRequest: request },
       priority: 5,
     });
     await dispatchRunner({ jobId: job.id });
@@ -489,7 +496,7 @@ export async function continueRunAction(
     const kind = plan.pipeline === "verify" ? "verify" : "test";
     await db
       .update(runs)
-      .set({ status: "queued", currentStage: kind, error: null, killRequested: false, completedAt: null })
+      .set({ ...reset, status: "queued", currentStage: kind })
       .where(eq(runs.id, run.id));
     const job = await enqueue({ runId: run.id, kind, payload: { continueRequest: request }, priority: 5 });
     await dispatchRunner({ jobId: job.id });
