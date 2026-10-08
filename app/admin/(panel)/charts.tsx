@@ -66,11 +66,14 @@ export function BarSeries({
           {format(total)} over {points.length} days
         </span>
       </figcaption>
-      <div className="flex items-end gap-[3px]" style={{ height }}>
+      <div className="flex items-stretch gap-[3px]" style={{ height }}>
         {points.map((p) => {
           const pct = (p.value / max) * 100;
           return (
-            <div key={p.label} className="group relative flex flex-1 flex-col justify-end">
+            /* h-full matters: a percentage height inside an auto-height parent
+               resolves to nothing, which is how a chart with real data renders
+               as an empty box. */
+            <div key={p.label} className="group relative flex h-full flex-1 flex-col justify-end">
               <div
                 className="w-full rounded-t-[3px] transition-colors"
                 style={{

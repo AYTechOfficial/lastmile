@@ -132,7 +132,17 @@ export default async function AdminDashboard() {
       {/* ————————————— the graphs ————————————— */}
       <div className="grid gap-4 lg:grid-cols-3">
         <SectionCard title="Tokens per day" hint="last 14 days, across every stage" className="lg:col-span-1">
-          <BarSeries points={tokensPerDay} label="" format={(v) => (v >= 1000 ? `${Math.round(v / 1000)}k tok` : `${v} tok`)} />
+          <BarSeries
+            points={tokensPerDay}
+            label=""
+            format={(v) =>
+              v >= 1_000_000
+                ? `${(v / 1_000_000).toFixed(2)}M tok`
+                : v >= 1000
+                  ? `${Math.round(v / 1000)}k tok`
+                  : `${v} tok`
+            }
+          />
         </SectionCard>
         <SectionCard title="Spend per day" hint="what runs charged to balances" className="lg:col-span-1">
           <BarSeries
