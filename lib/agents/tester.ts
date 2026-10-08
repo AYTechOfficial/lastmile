@@ -60,6 +60,9 @@ export type TestResult = {
 
 const PAGE_TIMEOUT_MS = 30_000;
 const MAX_HTML_FOR_REVIEW = 24_000;
+/* Per route, so eight routes still fit one review prompt with room for the
+   flows and the criteria beside them. */
+const PAGE_DIGEST_BUDGET = 6_000;
 
 export async function runTester(input: TestInput): Promise<TestResult> {
   const started = Date.now();
@@ -99,6 +102,11 @@ export async function runTester(input: TestInput): Promise<TestResult> {
   let assertions = 0;
   let passed = 0;
   const routeResults: { path: string; status: number; ms: number; ok: boolean; note?: string }[] = [];
+  /* Every route's rendered markup, kept for the review. The old review saw only
+     the main page, so a flow that lives on /game or /skins was judged missing
+     no matter how well it worked — a product could be complete and still score
+     as if three of its flows did not exist. */
+  const pages: { path: string; html: string }[] = [];
 
   for (const route of routes) {
     const t0 = Date.now();
@@ -119,6 +127,7 @@ export async function runTester(input: TestInput): Promise<TestResult> {
       assertions += 1;
       if (res.ok && looksLikeAPage(html)) {
         passed += 1;
+        pages.push({ path: route, html: pageDigest(html, PAGE_DIGEST_BUDGET) });
       } else if (status >= 300 && status < 400) {
         note = "redirected — the URL is not directly public";
       } else {
@@ -164,14 +173,14 @@ export async function runTester(input: TestInput): Promise<TestResult> {
     };
   }
 
-  /* ————— 2. the model review of the real page ————— */
+  /* ————— 2. the model review of the real pages ————— */
 
-  const rootHtml = await fetchText(base + "/");
+  const rootHtml = pages.length > 0 ? "" : await fetchText(base + "/");
   const issues: NewIssue[] = [];
   let modelScore: number | null = null;
   let tokens = 0;
 
-  if (rootHtml) {
+  if (pages.length > 0 || rootHtml) {
     const chatInput: ChatInput = {
       tier: input.plan.modelTier,
       userId: input.userId,
@@ -190,13 +199,17 @@ export async function runTester(input: TestInput): Promise<TestResult> {
     };
 
     const flows = input.spec?.flows ?? [];
+    const rendered =
+      pages.length > 0
+        ? pages.map((p) => `--- ${p.path} ---\n${p.html}`).join("\n\n")
+        : `--- / ---\n${(rootHtml ?? "").slice(0, MAX_HTML_FOR_REVIEW)}`;
     const review = await chatJson<{ issues?: { title?: string; detail?: string; severity?: string }[]; score?: number; flowsPassed?: string[] }>(
       chatInput,
       [
         {
           role: "system",
           content:
-            "You are testing a DEPLOYED web app against its acceptance criteria. You get the rendered HTML of the main page and the flows the product promised. A flow passes only if the HTML clearly contains what the criterion needs (a form, a list, a control, real content). Report real, visible defects only. Reply with ONLY JSON: {\"issues\": [{\"title\", \"detail\", \"severity\": \"critical\"|\"major\"|\"minor\"}], \"score\": 0-100, \"flowsPassed\": [\"flow name\"]}.",
+            "You are testing a DEPLOYED web app against its acceptance criteria. You get the rendered HTML of every route the product promised, one labelled block per route, and the flows it must serve. A flow passes when the page that serves it clearly contains what its criteria need (a form, a list, a board, a control, real content) — a flow whose screen lives on another route is NOT missing. Report real, visible defects only. Reply with ONLY JSON: {\"issues\": [{\"title\", \"detail\", \"severity\": \"critical\"|\"major\"|\"minor\"}], \"score\": 0-100, \"flowsPassed\": [\"flow name\"]}.",
         },
         {
           role: "user",
@@ -204,8 +217,9 @@ export async function runTester(input: TestInput): Promise<TestResult> {
             `LIVE URL: ${base}`,
             flows.length > 0
               ? `FLOWS TO JUDGE:\n${flows.map((f) => `- ${f.name}: ${f.criteria.join("; ")}`).join("\n")}`
-              : "FLOWS: unavailable — judge whether the page is a real product page",
-            `RENDERED HTML:\n${rootHtml.slice(0, MAX_HTML_FOR_REVIEW)}`,
+              : "FLOWS: unavailable — judge whether the pages are a real product",
+            `ROUTES THAT ANSWERED: ${routeResults.filter((r) => r.ok).map((r) => r.path).join(", ") || "none"}`,
+            `RENDERED PAGES (a flow may live on any of them):\n${rendered}`,
           ].join("\n\n"),
         },
       ],
@@ -270,6 +284,18 @@ export async function runTester(input: TestInput): Promise<TestResult> {
 
 /** A page, not an error slate: has markup, some text, and is not a bare
     "Internal Server Error" stub. */
+/** A page's markup, minus scripts and styles, squeezed for a review prompt:
+    what the page renders, not how it loads. */
+function pageDigest(html: string, budget: number): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, budget);
+}
+
 function looksLikeAPage(html: string): boolean {
   if (html.length < 200) return false;
   if (!/<html|<body|<div|<main|<head/i.test(html)) return false;
