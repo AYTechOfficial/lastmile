@@ -137,6 +137,10 @@ const prompt: StageExecutor = async (ctx) => {
     preferredModel: ctx.run.modelChoice,
     variant: ctx.run.specVariant,
     guidance: typeof ctx.payload.guidance === "string" ? ctx.payload.guidance : null,
+    /* A continue request rides the same channel as checkpoint guidance, with a
+       marker so the prompt agent knows this is a follow-up on a live product
+       rather than a first interpretation of a sentence. */
+    continueRequest: typeof ctx.payload.continueRequest === "string" ? (ctx.payload.continueRequest as string) : null,
     emit: ctx.emit,
     heartbeat: ctx.heartbeat,
   });
@@ -203,6 +207,9 @@ const code: StageExecutor = async (ctx) => {
     files,
     deployError,
     issuesText,
+    /* A user's own continue request is the highest-priority instruction the
+       fix round carries — above the defect ledger, because the human asked. */
+    continueRequest: typeof ctx.payload.continueRequest === "string" ? (ctx.payload.continueRequest as string) : null,
     iteration: ctx.iteration,
     emit: ctx.emit,
     heartbeat: ctx.heartbeat,

@@ -347,6 +347,160 @@ export async function retryRunAction(formData: FormData): Promise<void> {
   revalidatePath("/dashboard/runs/" + run.id);
 }
 
+/* ————————————————————————— continue building ————————————————————————— */
+
+/** What the continue-classifier may answer. `pipeline` names the stage whose
+    agent the request is really about; `research` means re-search first, and
+    everything else lands on the prompt agent to re-interpret the product. */
+type ContinuePlan = {
+  pipeline: "research" | "prompt" | "code" | "verify" | "test";
+  reasoning: string;
+};
+
+/** Classify a continue request with a model, so "add auth and signup" lands on
+    the prompt agent, "find me cheaper competitors" re-runs research, and "the
+    buttons look dead" goes straight to the coder. A template keyword match
+    would misroute real requests — this is exactly the mistake the research
+    query planner made before it became model-driven, so the router is a model
+    too. Falls back to the prompt stage: the safest general answer, since a
+    request that re-interprets the product can still reach every later stage
+    through the checkpoint. */
+async function classifyContinueRequest(
+  request: string,
+  tier: "free" | "premium",
+): Promise<ContinuePlan> {
+  const { chatJson } = await import("@/lib/ai/chat");
+  const { value } = await chatJson<Partial<ContinuePlan>>(
+    {
+      tier,
+      userId: null,
+      agent: "spec",
+      timeoutMs: 45_000,
+      maxRungs: 4,
+    },
+    [
+      {
+        role: "system",
+        content:
+          'You route a user\'s change request for an already-built web product to the right pipeline stage. "research" re-runs web research first (market, competitors, pricing questions). "prompt" re-plans the product (new features, new pages, auth, signup, new flows, design overhauls). "code" is a direct build change that needs no re-planning (a copy tweak, a colour, one component). "verify" re-checks the existing code. "test" re-runs live QA. Reply ONLY JSON: {"pipeline": "research"|"prompt"|"code"|"verify"|"test", "reasoning": "one sentence"}.',
+      },
+      { role: "user", content: `THE PRODUCT'S ORIGINAL REQUEST AND THE USER'S NEW REQUEST FOLLOW.\n\nNEW REQUEST: ${request.slice(0, 800)}` },
+    ],
+  );
+
+  const pipeline = value?.pipeline;
+  if (pipeline === "research" || pipeline === "prompt" || pipeline === "code" || pipeline === "verify" || pipeline === "test") {
+    return { pipeline, reasoning: (value?.reasoning ?? "").trim().slice(0, 200) || "model-routed" };
+  }
+  return { pipeline: "prompt", reasoning: "router did not answer cleanly — routed to the prompt agent" };
+}
+
+/** Continue building on a run that already ended.
+
+    The user types what they want next — "add auth and signup", "make it look
+    premium", "research cheaper competitors" — and the request is routed to
+    whichever agent it is really for. The router is a model, not keywords; the
+    chosen stage is logged on the run so the user can see the decision. From
+    there the pipeline's own machinery takes over: the checkpoint still gates
+    any build, and the quality loop still runs. */
+export async function continueRunAction(
+  _prev: ContinueRunState,
+  formData: FormData,
+): Promise<ContinueRunState> {
+  const session = await auth();
+  if (!session?.user?.id) return { error: "Sign in to continue building." };
+
+  const runId = String(formData.get("runId") ?? "");
+  const request = String(formData.get("request") ?? "").trim().slice(0, 600);
+  if (request.length < 5) {
+    return { error: "Describe what you want changed or added — at least a few words." };
+  }
+
+  const [run] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+  if (!run) return { error: "That run no longer exists." };
+  if (run.userId !== session.user.id) return { error: "This is not your project." };
+  if (!"done,failed,stopped".includes(run.status)) {
+    return { error: "This run is still in flight — wait for it to end or stop it first." };
+  }
+
+  const [user] = await db
+    .select({ plan: users.plan, suspendedAt: users.suspendedAt })
+    .from(users)
+    .where(eq(users.id, session.user.id))
+    .limit(1);
+  if (user?.suspendedAt) return { error: "This account is suspended, so new work is on hold." };
+
+  /* Continued work spends real tokens like any run, so an empty balance stops
+     here rather than failing mid-build. */
+  const balanceMilli = await getBalanceMilli(session.user.id);
+  if (balanceMilli <= 0) {
+    return { error: "Your credit balance is empty — an operator can top it up from the admin panel." };
+  }
+
+  const tier = planOf(user?.plan);
+  const limited = await rateLimit(`continue:${session.user.id}`, 6, 60_000);
+  if (!limited.ok) return { error: "That is a lot of change requests at once. Give it a minute." };
+
+  const plan = await classifyContinueRequest(request, tier.modelTier);
+
+  await logEvent(
+    run.id,
+    "orchestrator",
+    "command",
+    `$ lastmile continue — "${request}"`,
+  );
+  await logEvent(
+    run.id,
+    "orchestrator",
+    "info",
+    `routed to the ${plan.pipeline} agent — ${plan.reasoning}`,
+  );
+
+  const variant = run.specVariant + 1;
+
+  if (plan.pipeline === "research") {
+    await db
+      .update(runs)
+      .set({ status: "queued", currentStage: "research", error: null, killRequested: false, specVariant: variant, approvedAt: null, completedAt: null })
+      .where(eq(runs.id, run.id));
+    const job = await enqueue({ runId: run.id, kind: "research", payload: { continueRequest: request }, priority: 5 });
+    await dispatchRunner({ jobId: job.id });
+  } else if (plan.pipeline === "prompt") {
+    await db
+      .update(runs)
+      .set({ status: "queued", currentStage: "prompt", specVariant: variant, approvedAt: null, completedAt: null, error: null, killRequested: false })
+      .where(eq(runs.id, run.id));
+    const job = await enqueue({ runId: run.id, kind: "prompt", payload: { variant, guidance: request, continueRequest: true }, priority: 5 });
+    await dispatchRunner({ jobId: job.id });
+  } else if (plan.pipeline === "code") {
+    await db
+      .update(runs)
+      .set({ status: "queued", currentStage: "code", error: null, killRequested: false, approvedAt: run.approvedAt, completedAt: null })
+      .where(eq(runs.id, run.id));
+    const job = await enqueue({
+      runId: run.id,
+      kind: "code",
+      payload: { fixOnly: true, from: "continue", continueRequest: request, iteration: run.iterations + 1 },
+      priority: 5,
+    });
+    await dispatchRunner({ jobId: job.id });
+  } else {
+    // verify or test — a re-check of what exists, then the pipeline takes over
+    const kind = plan.pipeline === "verify" ? "verify" : "test";
+    await db
+      .update(runs)
+      .set({ status: "queued", currentStage: kind, error: null, killRequested: false, completedAt: null })
+      .where(eq(runs.id, run.id));
+    const job = await enqueue({ runId: run.id, kind, payload: { continueRequest: request }, priority: 5 });
+    await dispatchRunner({ jobId: job.id });
+  }
+
+  revalidatePath("/dashboard/runs/" + run.id);
+  return { ok: true, notice: `Routed to the ${plan.pipeline} agent — the run is queued again.` };
+}
+
+export type ContinueRunState = { ok?: boolean; notice?: string; error?: string };
+
 /** Runs for the dashboard list — newest first. */
 export async function listRuns(userId: string) {
   return db

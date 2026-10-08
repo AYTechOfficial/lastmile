@@ -11,6 +11,7 @@ import { ResearchBrief } from "@/components/app/research-brief";
 import { AgentDrawer, AgentMeta, IssueList } from "./agent-drawer";
 import { CodeViewer } from "./code-viewer";
 import { CompletionTakeover, FailureState } from "./completion";
+import { ContinueBox } from "./continue-box";
 import { LivePreview } from "./live-preview";
 import { PipelineCanvas } from "./pipeline-canvas";
 
@@ -237,6 +238,9 @@ export function Orchestrator({
       {!deckFull && run.status === "failed" ? (
         <FailureState error={run.error} issues={issues} runId={run.id} liveUrl={run.liveUrl} />
       ) : null}
+
+      {/* A run that ended is not a dead end: the human can keep building on it. */}
+      {!deckFull && ["done", "failed", "stopped"].includes(run.status) ? <ContinueBox runId={run.id} /> : null}
 
       {/* tabs */}
       <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="Build view sections">

@@ -58,6 +58,9 @@ export type CodeInput = {
   /** the open defect ledger (severity, title, files, diagnostics), carried from
       the runner when it enqueued this fix round */
   issuesText?: string | null;
+  /** a human's continue request on a finished product — the headline
+      instruction for this round, above any defect ledger */
+  continueRequest?: string | null;
   iteration: number;
   emit: (kind: "info" | "command" | "success" | "warn" | "error" | "url", line: string) => Promise<void>;
   heartbeat: () => Promise<void>;
@@ -633,16 +636,20 @@ function fixPrompt(
     )
     .join("\n\n");
 
-  return `Fix defects in an existing Next.js product. Reply with ONLY:
+  const continueAsk = input.continueRequest
+    ? `\nTHE HUMAN'S CONTINUE REQUEST (the headline for this round — build it to the same visual and quality bar as the rest of the product: AAA, polished, brand-consistent. Update the spec's routes/flows where the request adds them.):\n${input.continueRequest}\n`
+    : "";
+
+  return `${input.continueRequest ? "Update an existing Next.js product per the human's continue request." : "Fix defects in an existing Next.js product."} Reply with ONLY:
 { "files": [ { "path": "...", "content": "<the complete corrected file>" } ] }
 
 Return the COMPLETE corrected contents of only the files that need changing — not a diff, not a fragment.
 A file that ends mid-function, mid-object or mid-JSX is a failed build — if space is tight, simplify styling, never cut logic.
 Do not create package.json, tsconfig.json, next.config.mjs, postcss.config.mjs, app/layout.tsx, app/globals.css, components/ui.tsx or lib/persist.ts.
-Keep everything that already works; change only what the defects require.
+Keep everything that already works; change only what the defects require — UNLESS a continue request below says otherwise: then build the request fully, adding whatever files and routes it needs.
 When a screen is unreachable, fix the state transition that makes it unreachable — never delete the screen, and never leave it gated on the state the same update replaces.
 When the defect is a type mismatch, fix the type — never cast around it with "as X", and if the type belongs to another module, import it from there instead of declaring a second type with that name.
-${input.issuesText ? `
+${continueAsk}${input.issuesText ? `
 OPEN DEFECTS (the verifier's ledger — severity, the exact diagnostics, the files it names)
 ${input.issuesText}
 ` : ""}${input.deployError ? `

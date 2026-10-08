@@ -44,6 +44,9 @@ export type PromptInput = {
   variant: number;
   /** the human's note when they asked for changes */
   guidance?: string | null;
+  /** a follow-up request on a finished product ("add auth and signup") — the
+      run was done and the human asked for more */
+  continueRequest?: string | null;
   emit: (kind: "info" | "command" | "success" | "warn" | "error" | "url", line: string) => Promise<void>;
   heartbeat: () => Promise<void>;
 };
@@ -178,7 +181,7 @@ async function askSpec(
 RESEARCH
 ${evidence}
 
-${input.guidance ? `THE HUMAN ASKED FOR THESE CHANGES AT THE CHECKPOINT: ${input.guidance}\n` : ""}
+${input.guidance ? `THE HUMAN ASKED FOR THESE CHANGES AT THE CHECKPOINT: ${input.guidance}\n` : ""}${input.continueRequest ? `THE PRODUCT WAS ALREADY BUILT AND SHIPPED. The human is continuing work on it and asked: "${input.continueRequest}". Extend the spec to cover the request — new flows, routes and acceptance criteria for what was asked, keeping everything that already works. The next build is an update to a live product, not a fresh start.\n` : ""}
 Write the product spec. Rules:
 - Every flow needs acceptance criteria that a browser test could assert against a live URL. "It works" is not a criterion; "the item appears in the list after reload" is.
 - The stack is always a client-side React app — there is no backend in the generated product, so no server routes and no database.
@@ -211,6 +214,12 @@ async function askInstructions(
     maxRungs: 10,
   };
 
+  /* A continue request reframes the whole instruction document: the coder is
+     about to UPDATE a live product, and the human's ask is the headline. */
+  const continueHeader = input.continueRequest
+    ? `CONTINUE BUILD — the product already exists and is live. The human's new request is the primary contract for this update: "${input.continueRequest}". Everything below is the product it must grow into, not replace.\n\n`
+    : "";
+
   /* `chat`, not `chatJson`: this is prose by design, so asking for JSON would
      trigger a pointless parse-and-retry round and, worse, discard the model
      attribution that says which provider wrote the contract. */
@@ -222,7 +231,7 @@ async function askInstructions(
     },
     {
       role: "user",
-      content: `Write the build instructions for this product.
+      content: `${continueHeader}Write the build instructions for this product.
 
 NAME: ${spec.title}
 SUMMARY: ${spec.summary}
