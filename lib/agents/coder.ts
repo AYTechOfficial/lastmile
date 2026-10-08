@@ -370,26 +370,44 @@ async function fanOutWorkers(
 
   await input.emit(
     "info",
-    `-> splitting the build into ${packages.length} worker agent(s): ${packages.map((p) => p.label).join(", ")}`,
+    `-> splitting the build into ${packages.length} worker agent(s), one file each, run in order: ${packages.map((p) => p.label).join(", ")}`,
   );
 
-  const results = await Promise.all(
-    packages.map(async (pkg) => {
-      const chatInput: ChatInput = {
-        tier: input.plan.modelTier,
-        userId: input.userId,
-        agent: "code",
-        preferred: input.preferredModel ?? defaultModelFor(input.plan.modelTier),
-        timeoutMs: 240_000,
-        maxRungs: 10,
-        onAttempt: async (attempt) => {
-          if (!attempt.ok) {
-            await input.emit("warn", `  worker [${pkg.label}] rung failed: ${attempt.detail ?? "unknown"}`);
-          }
-        },
-      };
+  const results: { label: string; ok: boolean; files: GeneratedFile[]; tokens: number; reason?: string }[] = [];
+  for (const pkg of packages) {
+    const chatInput: ChatInput = {
+      tier: input.plan.modelTier,
+      userId: input.userId,
+      agent: "code",
+      preferred: input.preferredModel ?? defaultModelFor(input.plan.modelTier),
+      timeoutMs: 240_000,
+      maxRungs: 10,
+      onAttempt: async (attempt) => {
+        if (!attempt.ok) {
+          await input.emit("warn", `  worker [${pkg.label}] rung failed: ${attempt.detail ?? "unknown"}`);
+        }
+      },
+    };
 
-      const { value, result, parseError } = await chatJson<{ files?: GeneratedFile[] }>(chatInput, [
+    const { value, result, parseError } = await chatJson<{ files?: GeneratedFile[] }>(chatInput, [
+      {
+        role: "system",
+        content:
+          "You are a worker coding agent. You build ONE part of a larger Next.js product, exactly to your brief. You write complete, working code — no placeholders, no TODOs. You return ONLY files in your own scope. Think briefly, then answer — your reply budget is finite and the code matters more than deliberation.",
+      },
+      { role: "user", content: workerPrompt(input, pkg) },
+    ]);
+
+    const files = sanitize(value?.files ?? []);
+    for (const f of files) {
+      await input.emit("success", `  wrote ${f.path}`);
+    }
+    if (!result.ok || files.length === 0) {
+      /* The worker had one honest shot and the chain was hot — every rung 429'd
+         or burned out. Pause for the provider's own reset window and ask once
+         more before this screen is given up for the round. */
+      await rateLimitPause(input, result.reason ?? result.attempts.at(-1)?.detail, `worker [${pkg.label}]`);
+      const retry = await chatJson<{ files?: GeneratedFile[] }>(chatInput, [
         {
           role: "system",
           content:
@@ -397,11 +415,15 @@ async function fanOutWorkers(
         },
         { role: "user", content: workerPrompt(input, pkg) },
       ]);
-
-      const files = sanitize(value?.files ?? []);
-      return { label: pkg.label, ok: result.ok && files.length > 0, files, tokens: result.tokens, reason: result.reason ?? parseError };
-    }),
-  );
+      const retryFiles = sanitize(retry.value?.files ?? []);
+      for (const f of retryFiles) {
+        await input.emit("success", `  wrote ${f.path} (retry)`);
+      }
+      results.push({ label: pkg.label, ok: retry.result.ok && retryFiles.length > 0, files: retryFiles, tokens: result.tokens + retry.result.tokens, reason: retry.result.reason ?? retry.result.attempts.at(-1)?.detail });
+      continue;
+    }
+    results.push({ label: pkg.label, ok: true, files, tokens: result.tokens, reason: parseError });
+  }
 
   const delivered = results.filter((r) => r.ok);
   const files = delivered.flatMap((r) => r.files);
@@ -540,7 +562,24 @@ async function askModel(
 
 /* ————————————————————————— fix passes ————————————————————————— */
 
-const PASS_MAX_FILES = 2;
+const PASS_MAX_FILES = 1;
+
+/** The provider's own advice when it has one — 429s often carry "retry in 30
+    seconds". Capped so a hostile detail string cannot park a stage forever. */
+function retrySeconds(detail: string | undefined): number {
+  const m = (detail ?? "").match(/retry in (?:about )?(\d+(?:\.\d+)?)s/i);
+  return m ? Math.min(60, Math.max(10, Math.ceil(Number(m[1])))) : 45;
+}
+
+/** One bounded retry after the rate limiters breathe. The chain's own cooldowns
+    already bench the rungs that just 429'd, so the retry walks a healthier
+    chain rather than hammering the same door. */
+async function rateLimitPause(input: CodeInput, reason: string | undefined, what: string): Promise<void> {
+  const secs = retrySeconds(reason);
+  await input.emit("info", `  ${what}: every rung was rate-limited or unavailable — waiting ${secs}s for the limits to reset, then one retry`);
+  await new Promise((r) => setTimeout(r, secs * 1000));
+  await input.heartbeat();
+}
 
 /* A pass is only worthwhile when the model can see what it is fixing, so the
    context of each pass is strictly bounded: its own files' current contents
@@ -599,6 +638,24 @@ async function fixInPasses(
     }
 
     if (!result.ok || !value) {
+      await rateLimitPause(input, result.reason ?? result.attempts.at(-1)?.detail, `pass ${i + 1}`);
+      const retry = await chatJson<{ files?: GeneratedFile[] }>(chatInput, [
+        {
+          role: "system",
+          content:
+            "You are a senior front-end engineer. You write complete, working Next.js App Router code. You never write placeholders, TODOs, or comments explaining what code should do — you write the code. Think briefly, then answer — your reply budget is finite and the code matters more than deliberation.",
+        },
+        { role: "user", content: prompt },
+      ]);
+      if (retry.result.ok && retry.value) {
+        const retryFiles = sanitize(retry.value.files ?? []);
+        tokens += retry.result.tokens;
+        for (const f of retryFiles) {
+          emitted.push(f);
+          await input.emit("success", `  wrote ${f.path} (retry)`);
+        }
+        continue;
+      }
       passFailures += 1;
       continue;
     }
@@ -609,7 +666,10 @@ async function fixInPasses(
       continue;
     }
     tokens += result.tokens;
-    for (const f of files) emitted.push(f);
+    for (const f of files) {
+      emitted.push(f);
+      await input.emit("success", `  wrote ${f.path}`);
+    }
   }
   return {
     files: emitted,
