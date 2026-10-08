@@ -393,7 +393,7 @@ async function fanOutWorkers(
         {
           role: "system",
           content:
-            "You are a worker coding agent. You build ONE part of a larger Next.js product, exactly to your brief. You write complete, working code — no placeholders, no TODOs. You return ONLY files in your own scope.",
+            "You are a worker coding agent. You build ONE part of a larger Next.js product, exactly to your brief. You write complete, working code — no placeholders, no TODOs. You return ONLY files in your own scope. Think briefly, then answer — your reply budget is finite and the code matters more than deliberation.",
         },
         { role: "user", content: workerPrompt(input, pkg) },
       ]);
@@ -503,7 +503,7 @@ async function askModel(
     {
       role: "system",
       content:
-        "You are a senior front-end engineer. You write complete, working Next.js App Router code. You never write placeholders, TODOs, or comments explaining what code should do — you write the code.",
+        "You are a senior front-end engineer. You write complete, working Next.js App Router code. You never write placeholders, TODOs, or comments explaining what code should do — you write the code. Think briefly, then answer — your reply budget is finite and the code matters more than deliberation.",
     },
     { role: "user", content: prompt },
   ]);
@@ -583,12 +583,18 @@ async function loadFixContext(input: CodeInput): Promise<{
   const { owner, name } = input.repo;
   const files: { path: string; content: string }[] = [];
   const seen = new Set<string>();
-  let budget = 64_000;
+  /* Deliberately tight. Reasoning models (GLM, DeepSeek) size their thinking to
+     the prompt: at a 79-token input one answered fully in 8s; at 4k+ tokens the
+     same model burned its whole output budget thinking and returned empty
+     content — the "empty message" failure that used to cost whole fix rounds.
+     ~24k characters (~6k tokens) of context keeps the chain's reasoning models
+     inside the range where they actually answer. */
+  let budget = 24_000;
 
   for (const path of (input.files ?? []).slice(0, 6)) {
     const content = await getRepoFile(owner, name, path);
     if (!content) continue;
-    const clipped = content.slice(0, 24_000);
+    const clipped = content.slice(0, 8_000);
     if (clipped.length > budget) break;
     budget -= clipped.length;
     seen.add(path);
@@ -610,11 +616,11 @@ async function loadFixContext(input: CodeInput): Promise<{
     }
   }
 
-  for (const candidate of companions.slice(0, 8)) {
+  for (const candidate of companions.slice(0, 5)) {
     if (budget <= 0) break;
     const content = await getRepoFile(owner, name, candidate);
     if (!content) continue;
-    const clipped = content.slice(0, 12_000);
+    const clipped = content.slice(0, 4_000);
     if (clipped.length > budget) break;
     budget -= clipped.length;
     seen.add(candidate);
@@ -622,7 +628,7 @@ async function loadFixContext(input: CodeInput): Promise<{
   }
 
   const kit = await getRepoFile(owner, name, "components/ui.tsx");
-  return { files, kit: kit ? kit.slice(0, 14_000) : null };
+  return { files, kit: kit ? kit.slice(0, 6_000) : null };
 }
 
 function fixPrompt(
@@ -677,8 +683,8 @@ ListRow({ record?, title?, subtitle?, trailing?, className? })
 STORAGE ("@/lib/persist" is harness-owned — import it, never rewrite it, never touch localStorage directly)
 readLocal<T>(key: string, fallback: T): T   — returns the fallback on the server, where localStorage does not exist
 writeLocal(key: string, value: unknown): void
-MASTER BUILD PROMPT (the contract the code is held to)
-${input.master?.instructions ?? input.sentence}`;
+MASTER BUILD PROMPT (the contract the code is held to — trimmed; the defect ledger above and the file contents are the authoritative detail for this round)
+${(input.master?.instructions ?? input.sentence).slice(0, 6_000)}${(input.master?.instructions ?? "").length > 6_000 ? "\n… (trimmed — fix exactly what the ledger names, not the whole spec)" : ""}`;
 }
 
 /* ————————————————————————— validation ————————————————————————— */
@@ -918,7 +924,7 @@ export async function repairWithCompiler(
   const shared = files.filter((f) => /^(components\/ui|lib\/)/.test(f.path)).slice(0, 3);
   const show = [...new Set([...suspects, ...shared])].slice(0, 6);
 
-  const context = show.map((f) => `--- ${f.path} ---\n${f.content.slice(0, 20_000)}`).join("\n\n");
+  const context = show.map((f) => `--- ${f.path} ---\n${f.content.slice(0, 8_000)}`).join("\n\n");
 
   const chatInput: ChatInput = {
     tier: input.plan.modelTier,
@@ -956,7 +962,7 @@ RULES
     {
       role: "system",
       content:
-        "You are a senior TypeScript engineer repairing a Next.js App Router project that fails to compile. You return complete corrected files, and you never cast around a type error — you fix the type.",
+        "You are a senior TypeScript engineer repairing a Next.js App Router project that fails to compile. You return complete corrected files, and you never cast around a type error — you fix the type. Think briefly, then answer — your reply budget is finite and the fix matters more than deliberation.",
     },
     { role: "user", content: prompt },
   ]);

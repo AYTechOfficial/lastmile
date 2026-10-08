@@ -111,6 +111,12 @@ function rungKey(rung: { id: string; model: string }): string {
   return `${rung.id}|${rung.model}`;
 }
 
+/** A rung that burned its budget thinking earns a SHORT cooldown, not the
+    default: the same rung with a smaller prompt answers fine (measured — a
+    79-token prompt gets a full answer where a 4k-token one gets nothing), so
+    the next call should still be able to reach it. */
+const REASONING_BURN = /spent its whole output budget reasoning/i;
+
 /** How long a failure should keep a rung out of the chain. A retired model is
     a fact about the catalog (hours); a quota is a fact about the minute;
     everything else gets one short breath. */
@@ -119,6 +125,7 @@ function cooldownMs(status: number, detail: string | undefined): number {
   if (status === 401 || status === 403) return 30 * 60 * 1000;
   if (status === 429) return 2 * 60 * 1000;
   if (status >= 500) return 2 * 60 * 1000;
+  if (status === 200 && REASONING_BURN.test(detail ?? "")) return 30 * 1000;
   /* a 400 from a content filter is deterministic for the same request, but the
      next request is usually different — keep the penalty short and local */
   if (/sensitive|content.?filter|policy/i.test(detail ?? "")) return 5 * 60 * 1000;
@@ -302,12 +309,33 @@ async function callOpenAi(
 
   try {
     const body = JSON.parse(raw) as {
-      choices?: { message?: { content?: string } }[];
+      choices?: { message?: { content?: string; reasoning_content?: string }; finish_reason?: string }[];
       usage?: { total_tokens?: number };
     };
-    const text = body.choices?.[0]?.message?.content ?? "";
+    const choice = body.choices?.[0];
+    const text = choice?.message?.content ?? "";
     if (!text.trim()) {
-      return { ok: false, status: 200, text: "", tokens: 0, detail: "the endpoint returned an empty message" };
+      /* Reasoning models (GLM, DeepSeek-R1 lineage) spend their output budget
+         thinking and can hit `finish_reason: length` with `content: ""` — the
+         endpoint answered, the request was valid, the model just never got to
+         the answer. The thinking stream often CONTAINS the finished answer
+         anyway, so rescue it before declaring the rung dead. */
+      const reasoning = choice?.message?.reasoning_content ?? "";
+      const rescued = reasoning.trim() ? extractJson<unknown>(reasoning) : null;
+      if (rescued) {
+        const start = reasoning.search(/[[{]/);
+        return { ok: true, status: 200, text: start >= 0 ? reasoning.slice(start) : reasoning, tokens: body.usage?.total_tokens ?? 0 };
+      }
+      return {
+        ok: false,
+        status: 200,
+        text: "",
+        tokens: 0,
+        detail:
+          choice?.finish_reason === "length"
+            ? `the model spent its whole output budget reasoning (${body.usage?.total_tokens ?? "?"} tokens total) and never answered — the prompt is too large for this model's reasoning style`
+            : "the endpoint returned an empty message",
+      };
     }
     return { ok: true, status: 200, text, tokens: body.usage?.total_tokens ?? 0 };
   } catch {
@@ -357,14 +385,24 @@ async function callAnthropic(
 
   try {
     const body = JSON.parse(raw) as {
-      content?: { type?: string; text?: string }[];
+      content?: { type?: string; text?: string; thinking?: string }[];
       usage?: { input_tokens?: number; output_tokens?: number };
     };
-    const text = (body.content ?? [])
+    const blocks = body.content ?? [];
+    const text = blocks
       .filter((b) => b.type === "text" || typeof b.text === "string")
       .map((b) => b.text ?? "")
       .join("");
     if (!text.trim()) {
+      /* Same reasoning-model rescue as the OpenAI dialect: a thinking-only
+         reply often holds the finished answer inside the thinking blocks. */
+      const thinking = blocks
+        .filter((b) => b.type === "thinking" && typeof b.thinking === "string")
+        .map((b) => b.thinking ?? "")
+        .join("\n");
+      if (thinking.trim() && extractJson(thinking)) {
+        return { ok: true, status: 200, text: thinking, tokens: (body.usage?.input_tokens ?? 0) + (body.usage?.output_tokens ?? 0) };
+      }
       return { ok: false, status: 200, text: "", tokens: 0, detail: "the endpoint returned an empty message" };
     }
     const tokens = (body.usage?.input_tokens ?? 0) + (body.usage?.output_tokens ?? 0);
