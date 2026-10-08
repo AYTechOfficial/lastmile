@@ -85,12 +85,15 @@ function querySet(sentence: string, subject: string): { query: string; why: stri
 }
 
 /** The subject of the sentence, stripped of the scaffolding that makes it a
-    product request: "a CRM for freelance photographers" → "CRM freelance
-    photographers". Search engines do better with the nouns than the sentence. */
+    product request: "build me a CRM for freelance photographers" → "crm
+    freelance photographers". Search engines do better with the nouns than the
+    sentence. The verb list is the same lesson the slug learned: the words of
+    ASKING are not the thing asked for, and "me recipe competitors" is what
+    leaks when they are not stripped. */
 function subjectOf(sentence: string): string {
   const cleaned = sentence
     .toLowerCase()
-    .replace(/\b(build|create|make|an?|the|app|application|tool|platform|website|site|for)\b/g, " ")
+    .replace(/\b(build|built|create|creating|make|making|me|my|want|need|like|an?|the|app|application|tool|platform|website|site|for|with|that)\b/g, " ")
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();

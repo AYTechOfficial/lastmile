@@ -29,7 +29,7 @@ const { logEvent } = await import("../lib/events");
    issue ledger lives in issues.ts. */
 const { advance, filesToRepatch } = await import("../lib/pipeline/state");
 const { openIssues } = await import("../lib/pipeline/issues");
-const { planOf } = await import("../lib/plans");
+const { effectivePlan } = await import("../lib/platform/settings");
 const { STAGE_EXECUTORS, hasExecutor } = await import("./stages");
 const { dispatchRunner } = await import("../lib/platform/runner");
 
@@ -66,7 +66,10 @@ async function main(): Promise<void> {
     return;
   }
 
-  const plan = planOf(run.planId);
+  /* The operator's routing switch decides which catalog this plan actually
+     reaches — read fresh per job, so a change in the panel applies to the next
+     run with no deploy. */
+  const plan = await effectivePlan(run.planId);
   const iteration = run.iterations + 1;
 
   if (run.killRequested) {

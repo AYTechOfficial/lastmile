@@ -2,7 +2,8 @@ import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { platformSettings } from "../schema";
 import { decryptSecret, encryptSecret } from "../crypto";
-import type { ModelTier, PlanId } from "../plans";
+import type { ModelTier, PlanId, PlanConfig } from "../plans";
+import { planOf } from "../plans";
 import { AION_MODEL_IDS, AION_PROVIDER, HCNSEC_MODEL_IDS, HCNSEC_PROVIDER, TRUE_MODEL_IDS, TRUE_PROVIDER } from "../ai/catalog";
 
 /* Operator configuration — everything the admin panel edits, in one row.
@@ -400,6 +401,24 @@ export async function updatePlatformData(
 }
 
 /* ————————————————————————— resolution ————————————————————————— */
+
+/** The plan a run actually gets, with the operator's routing switch applied.
+
+    `planOf` is static — the ceiling a plan is sold with. The operator's panel
+    decides which CATALOG each plan routes to, and that switch used to be
+    decorative: stored, displayed, saved with a promise that the next job would
+    use it, and never read by anything. A Pro run then walked whatever tier the
+    code hardcoded — which is how a pinned, working free provider was invisible
+    to a Pro run while a dead premium one was the only rung it had.
+
+    Read fresh per run, so the switch applies to the next job with no deploy —
+    exactly what the panel's own copy promises. */
+export async function effectivePlan(planId: string | null | undefined): Promise<PlanConfig> {
+  const base = planOf(planId);
+  const { policy } = await getPlatformData();
+  const tier = policy[base.id] ?? base.modelTier;
+  return tier === base.modelTier ? base : { ...base, modelTier: tier };
+}
 
 export type ResolvedProvider = {
   id: string;
