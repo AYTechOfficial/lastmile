@@ -32,6 +32,10 @@ import type { MasterBuildPrompt, ProductSpec } from "../domain";
 import { chatJson, defaultModelFor, type ChatInput } from "../ai/chat";
 import { commitFiles, ensureRepo, getRepoFile, latestSha } from "../platform/github";
 import type { PlanConfig } from "../plans";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 export type CodeInput = {
   sentence: string;
@@ -129,7 +133,7 @@ export async function runCoder(input: CodeInput): Promise<CodeResult> {
      per request, more parallelism, and one bad worker cannot erase the others. */
   const generated = input.firstPass ? await fanOutWorkers(input) : await askModel(input);
   let files = generated.files;
-  const tokens = generated.tokens;
+  let tokens = generated.tokens;
   let reason = generated.reason;
 
   if (input.firstPass && generated.workers) {
@@ -170,7 +174,20 @@ export async function runCoder(input: CodeInput): Promise<CodeResult> {
 
   await input.heartbeat();
 
-  /* ————— 3. commit ————— */
+  /* ————— 3. the harness's own guarantee ————— */
+
+  /* The header promises that the model writes the product and the harness
+     guarantees it builds. This is where that promise is kept: the merged
+     project is installed and type-checked for real before anything is
+     committed, and the compiler's own output drives repair rounds when it
+     fails. */
+  const gate = await compileGate(input, files);
+  files = gate.files;
+  tokens += gate.tokens;
+
+  await input.heartbeat();
+
+  /* ————— 4. commit ————— */
 
   const commit = await commitFiles({
     owner,
@@ -382,6 +399,7 @@ STRICT RULES
     EmptyState({ title?, message?, description?, icon?, action?, className? })
     ListRow({ record?, title?, subtitle?, trailing?, className? })
   Call them with exactly these props — any other prop name is a TypeScript error and fails the build.
+- Shared types are contracts: declare each one in ONE file and import it everywhere else. Never declare a type whose name another module already exports — two same-named declarations with different shapes are accepted file by file and rejected when the files are merged, and the compiler prints both as the same name.
 - Any other shared piece goes in "components/widgets.tsx" (your file) and must not re-export or shadow the kit's names.
 - Write REAL content for this specific product. No lorem ipsum, no placeholders, no TODOs.
 - Do not create any file not listed above.
@@ -460,6 +478,7 @@ STRICT RULES
     EmptyState({ title?, message?, description?, icon?, action?, className? })
     ListRow({ record?, title?, subtitle?, trailing?, className? })
   Calling them with any other prop name is a TypeScript error and fails the build.
+- Shared types are contracts: declare each one in ONE file and import it everywhere else. Never declare a type whose name another module already exports — two same-named declarations with different shapes are accepted file by file and rejected when the files are merged, and the compiler prints both as the same name.
 - Escape all newlines inside "content" correctly so the JSON parses.
 
 MASTER BUILD PROMPT
@@ -498,15 +517,43 @@ async function loadFixContext(input: CodeInput): Promise<{
   if (!input.repo) return { files: [], kit: null };
   const { owner, name } = input.repo;
   const files: { path: string; content: string }[] = [];
-
+  const seen = new Set<string>();
   let budget = 64_000;
+
   for (const path of (input.files ?? []).slice(0, 6)) {
     const content = await getRepoFile(owner, name, path);
     if (!content) continue;
     const clipped = content.slice(0, 24_000);
     if (clipped.length > budget) break;
     budget -= clipped.length;
+    seen.add(path);
     files.push({ path, content: clipped });
+  }
+
+  /* And the modules those files import. A defect in a screen is often really a
+     mismatch with a type another module owns — a store that declares
+     `winner: string` while the screen declares `winner: Player | null`. The
+     fixer that cannot see the other side of that contract invents a cast
+     instead of a fix, and the next build fails the same way. */
+  const companions: string[] = [];
+  for (const file of files) {
+    for (const match of file.content.matchAll(/from\s+["'](@\/[^"']+)["']/g)) {
+      const base = match[1].slice(2);
+      for (const candidate of [`${base}.ts`, `${base}.tsx`, `${base}/index.ts`, `${base}/index.tsx`]) {
+        if (!seen.has(candidate) && !companions.includes(candidate)) companions.push(candidate);
+      }
+    }
+  }
+
+  for (const candidate of companions.slice(0, 8)) {
+    if (budget <= 0) break;
+    const content = await getRepoFile(owner, name, candidate);
+    if (!content) continue;
+    const clipped = content.slice(0, 12_000);
+    if (clipped.length > budget) break;
+    budget -= clipped.length;
+    seen.add(candidate);
+    files.push({ path: candidate, content: clipped });
   }
 
   const kit = await getRepoFile(owner, name, "components/ui.tsx");
@@ -531,6 +578,7 @@ Return the COMPLETE corrected contents of only the files that need changing — 
 A file that ends mid-function, mid-object or mid-JSX is a failed build — if space is tight, simplify styling, never cut logic.
 Do not create package.json, tsconfig.json, next.config.mjs, postcss.config.mjs, app/layout.tsx, app/globals.css or components/ui.tsx.
 Keep everything that already works; change only what the defects require.
+When the defect is a type mismatch, fix the type — never cast around it with "as X", and if the type belongs to another module, import it from there instead of declaring a second type with that name.
 ${input.issuesText ? `
 OPEN DEFECTS (the verifier's ledger — severity, the exact diagnostics, the files it names)
 ${input.issuesText}
@@ -541,6 +589,9 @@ ${input.deployError.slice(0, 2000)}
 FILES THE DEFECTS POINT AT
 ${(input.files ?? []).join("\n") || "(the defects did not name files — find them yourself)"}
 ${contents ? `
+CURRENT CONTENTS OF THOSE FILES, AND OF THE MODULES THEY IMPORT (authoritative)
+A defect is often a contract between two files, not a mistake inside one. If a type is declared in one of these files, import it — never declare a second type with the same name, and never cast around a mismatch with "as X".
+
 ${contents}
 ` : ""}${context.kit ? `
 SHARED KIT (reference — harness-owned, import from "@/components/ui", never rewrite)
@@ -596,6 +647,238 @@ function sanitize(files: GeneratedFile[]): GeneratedFile[] {
 
 function isScaffold(path: string): boolean {
   return FORBIDDEN.test(path);
+}
+
+/* ————————————————————————— the compile gate ————————————————————————— */
+
+/* One failure mode kept costing whole runs, and it always looked the same: two
+   workers declare a type with the same name and different shapes — the store
+   says `winner: string`, the screen says `winner: Player | null` — or a fix
+   round patches one file and breaks the contract another file owns. Each file
+   compiles alone, so nothing notices until a later build, and the fixer that
+   gets the error cannot see the other side of the contract, so it casts around
+   the mismatch instead of fixing it and the next build fails the same way.
+
+   The answer is not a smarter prompt, it is the compiler: materialise the
+   merged project, install it, run the real `tsc` over it, and when it rejects
+   the code, hand the compiler's own output back to the model and try again.
+   Nothing reaches the commit blind. If the error survives its repairs, it is
+   reported honestly and the verifier sees the real state. */
+
+const SELF_CHECK_REPAIRS = 2;
+const INSTALL_TIMEOUT_MS = 300_000;
+const TSC_TIMEOUT_MS = 180_000;
+const MAX_REPORTED_ERRORS = 6_000;
+
+type CommandResult = { code: number; out: string };
+
+/** Run a command and resolve with its exit code and combined output. It never
+    rejects — a failing compiler is data here, not an exception.
+
+    `shell` is opt-in because it concatenates the command line: a shell is
+    needed to launch npm's .cmd shim on Windows (Node refuses it otherwise),
+    but it must never wrap the Node binary, whose own path can contain spaces
+    when it lives under "C:\Program Files". Every argument here is a constant. */
+function runCommand(
+  command: string,
+  args: string[],
+  cwd: string,
+  timeoutMs: number,
+  shell = false,
+): Promise<CommandResult> {
+  return new Promise((resolve) => {
+    execFile(
+      command,
+      args,
+      { cwd, timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, windowsHide: true, shell },
+      (error, stdout, stderr) => {
+        const out = `${stdout ?? ""}${stderr ?? ""}`;
+        if (!error) return resolve({ code: 0, out });
+        const code = typeof error.code === "number" ? error.code : 1;
+        resolve({ code, out: out || error.message });
+      },
+    );
+  });
+}
+
+async function writeProject(dir: string, files: GeneratedFile[]): Promise<void> {
+  for (const file of files) {
+    const target = path.join(dir, file.path);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, file.content, "utf8");
+  }
+}
+
+/** The first real compiler line — the rest of a tsc report is noise in a run log. */
+function firstErrorLine(errors: string): string {
+  const line = errors.split("\n").find((l) => /error TS\d+/.test(l)) ?? errors.split("\n")[0] ?? "";
+  return line.trim().slice(0, 300);
+}
+
+/** The repair's files replace their paths in the project; nothing else moves. */
+function mergeRepairs(files: GeneratedFile[], repairs: GeneratedFile[]): GeneratedFile[] {
+  const byPath = new Map(files.map((f) => [f.path, f]));
+  for (const repair of repairs) {
+    if (isScaffold(repair.path)) continue;
+    byPath.set(repair.path, repair);
+  }
+  return [...byPath.values()];
+}
+
+export async function compileGate(
+  input: CodeInput,
+  files: GeneratedFile[],
+): Promise<{ files: GeneratedFile[]; tokens: number }> {
+  let tokens = 0;
+  const started = Date.now();
+  const dir = await mkdtemp(path.join(tmpdir(), "lastmile-check-"));
+
+  try {
+    await writeProject(dir, files);
+    await input.emit("info", "-> self-check: installing the merged project and type-checking it before the commit");
+
+    const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+    const install = await runCommand(
+      npm,
+      ["install", "--no-audit", "--no-fund", "--loglevel=error"],
+      dir,
+      INSTALL_TIMEOUT_MS,
+      process.platform === "win32",
+    );
+    if (install.code !== 0) {
+      await input.emit("warn", `self-check skipped — the sandbox install failed (${install.out.trim().slice(0, 200)})`);
+      return { files, tokens };
+    }
+
+    const typecheck = () =>
+      runCommand(
+        process.execPath,
+        [path.join("node_modules", "typescript", "bin", "tsc"), "--noEmit", "-p", "tsconfig.json"],
+        dir,
+        TSC_TIMEOUT_MS,
+      );
+
+    let check = await typecheck();
+    if (check.code === 0) {
+      await input.emit(
+        "success",
+        `self-check passed — the merged project type-checks clean (${Math.round((Date.now() - started) / 1000)}s)`,
+      );
+      return { files, tokens };
+    }
+
+    let errors = check.out.trim().slice(0, MAX_REPORTED_ERRORS);
+    await input.emit("warn", `self-check: the compiler rejects the merged project — ${firstErrorLine(errors)}`);
+
+    let current = files;
+    for (let attempt = 1; attempt <= SELF_CHECK_REPAIRS; attempt += 1) {
+      await input.heartbeat();
+      const repaired = await repairWithCompiler(input, current, errors, attempt);
+      tokens += repaired.tokens;
+
+      if (repaired.files.length === 0) {
+        await input.emit("warn", `-> compiler repair ${attempt}/${SELF_CHECK_REPAIRS}: the model returned nothing usable`);
+        continue;
+      }
+
+      current = mergeRepairs(current, repaired.files);
+      await writeProject(dir, repaired.files);
+      check = await typecheck();
+
+      if (check.code === 0) {
+        await input.emit(
+          "success",
+          `-> compiler repair ${attempt}/${SELF_CHECK_REPAIRS} cleared it — the project type-checks clean`,
+        );
+        return { files: current, tokens };
+      }
+
+      errors = check.out.trim().slice(0, MAX_REPORTED_ERRORS);
+      await input.emit("warn", `-> compiler repair ${attempt}/${SELF_CHECK_REPAIRS} still finds — ${firstErrorLine(errors)}`);
+    }
+
+    /* Honest fallback. Claiming a clean build here would make the dashboard lie
+       about a codebase that does not compile. */
+    await input.emit(
+      "warn",
+      `self-check could not clear the compiler in ${SELF_CHECK_REPAIRS} repair round(s) — committing the real state so the verifier reports it`, 
+    );
+    return { files: current, tokens };
+  } catch (error) {
+    await input.emit(
+      "warn",
+      `self-check could not run (${error instanceof Error ? error.message : String(error)}) — committing without it`,
+    );
+    return { files, tokens };
+  } finally {
+    await rm(dir, { recursive: true, force: true, maxRetries: 2 }).catch(() => {});
+  }
+}
+
+/** Ask the model to repair the project against the compiler's own output. The
+    errors name the files; those files' contents, the shared kit and the
+    project's lib/ modules travel with the request, because the defect is
+    usually a contract between two files, not a mistake inside one. */
+export async function repairWithCompiler(
+  input: CodeInput,
+  files: GeneratedFile[],
+  errors: string,
+  attempt: number,
+): Promise<{ files: GeneratedFile[]; tokens: number }> {
+  const named = new Set<string>();
+  for (const match of errors.matchAll(/([A-Za-z0-9_@./-]+\.(?:tsx|ts|jsx|js))\((\d+),(\d+)\)/g)) {
+    named.add(match[1].replace(/^\.\//, "").replace(/^\//, ""));
+  }
+
+  const suspects = files.filter((f) => named.has(f.path)).slice(0, 4);
+  const shared = files.filter((f) => /^(components\/ui|lib\/)/.test(f.path)).slice(0, 3);
+  const show = [...new Set([...suspects, ...shared])].slice(0, 6);
+
+  const context = show.map((f) => `--- ${f.path} ---\n${f.content.slice(0, 20_000)}`).join("\n\n");
+
+  const chatInput: ChatInput = {
+    tier: input.plan.modelTier,
+    userId: input.userId,
+    agent: "code",
+    preferred: input.preferredModel ?? defaultModelFor(input.plan.modelTier),
+    timeoutMs: 240_000,
+    maxRungs: 6,
+    onAttempt: async (a) => {
+      await input.emit(
+        a.ok ? "success" : "warn",
+        `  repair ${attempt} · model ${a.provider}/${a.model} ${a.ok ? "answered" : `failed (${a.detail ?? "unknown"})`} in ${Math.round(a.ms / 1000)}s`,
+      );
+    },
+  };
+
+  const prompt = `The TypeScript compiler rejected this Next.js project before its commit. Fix exactly what it reports, and return the COMPLETE corrected contents of only the files that need changing.
+
+Reply with ONLY a JSON object of the shape:
+{ "files": [ { "path": "...", "content": "<the complete corrected file>" } ] }
+
+COMPILER OUTPUT (tsc --noEmit, verbatim)
+${errors}
+
+CURRENT CONTENTS
+${context}
+
+RULES
+- Return complete files only. A file that ends mid-function, mid-object or mid-JSX is another failed build — if space is tight, simplify styling, never cut logic.
+- Two different declarations that share one name are printed as that single name (a mismatch often reads as "MatchHistory | MatchHistory"). When a value is rejected — at a setState boundary, say — check whether the type really lives in another file: if it does, delete the local declaration and import that type instead, and do not silence it with "as X".
+- Keep everything that already works; change only what the errors require.
+- Do not create package.json, tsconfig.json, next.config.mjs, postcss.config.mjs, app/layout.tsx, app/globals.css or components/ui.tsx.`;
+
+  const { value, result } = await chatJson<{ files?: GeneratedFile[] }>(chatInput, [
+    {
+      role: "system",
+      content:
+        "You are a senior TypeScript engineer repairing a Next.js App Router project that fails to compile. You return complete corrected files, and you never cast around a type error — you fix the type.",
+    },
+    { role: "user", content: prompt },
+  ]);
+
+  if (!result.ok || !value) return { files: [], tokens: result.tokens };
+  return { files: sanitize(value.files ?? []), tokens: result.tokens };
 }
 
 /* ————————————————————————— the scaffold ————————————————————————— */
