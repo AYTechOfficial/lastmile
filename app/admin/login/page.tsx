@@ -7,6 +7,11 @@ import { AdminLoginForm } from "./login-form";
 
 export const metadata = { title: "Admin sign-in — LastMile" };
 
+/* Dynamic for a stronger reason than the panel's other pages: this page seeds
+   the default credentials when the panel has none, and a build must never write
+   a password hash into a production database. */
+export const dynamic = "force-dynamic";
+
 /* The panel's door.
 
    Deliberately its own page, outside the product's shell: this is where the

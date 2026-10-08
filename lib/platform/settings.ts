@@ -295,31 +295,26 @@ function defaults(): PlatformData {
   };
 }
 
-/* A short cache: this row is read on nearly every page and changes rarely.
-   Invalidated on save, and refreshed at most once a minute in a long-lived
-   worker. */
-let cached: { at: number; data: PlatformData } | null = null;
-const TTL_MS = 60_000;
-
+/* No cache, on purpose. This row is one primary-key lookup — about a
+   millisecond — and the last version cached it for sixty seconds, which is how
+   the panel learned to lie: on serverless, every instance holds its own copy,
+   so an operator saved an order on one instance and refreshed onto another
+   that was still showing the old one. Worse, a mutation built from a stale
+   snapshot wrote the WHOLE row back, silently reverting someone else's change.
+   Fresh reads cost almost nothing and make both failures impossible. */
 export async function getPlatformData(): Promise<PlatformData> {
-  if (cached && Date.now() - cached.at < TTL_MS) return cached.data;
-
-  let data: PlatformData;
   try {
     const [row] = await db
       .select()
       .from(platformSettings)
       .where(eq(platformSettings.id, "app"))
       .limit(1);
-    data = row ? mergeWithDefaults(row.data as Partial<PlatformData>) : defaults();
+    return row ? mergeWithDefaults(row.data as Partial<PlatformData>) : defaults();
   } catch {
     /* A settings read must never take a page down. Falling back to the
        env-configured defaults degrades to a working pipeline. */
-    data = defaults();
+    return defaults();
   }
-
-  cached = { at: Date.now(), data };
-  return data;
 }
 
 /** New catalog fields must appear for rows written by an older version. */
@@ -370,15 +365,38 @@ export async function savePlatformData(data: PlatformData): Promise<void> {
       target: platformSettings.id,
       set: { data, updatedAt: new Date() },
     });
-  cached = null;
 }
 
+/* A mutation is a read-modify-write of one shared row, and on serverless two
+   instances can run them at the same instant. Done naively — read, patch,
+   write — both read the same snapshot and the slower write erases the faster
+   one's change. So the read happens inside a transaction that locks the row
+   until the write lands: the second writer waits, then patches the FIRST
+   writer's result. Every mutation in the panel goes through here. */
 export async function updatePlatformData(
   patch: (current: PlatformData) => PlatformData,
 ): Promise<PlatformData> {
-  const next = patch(await getPlatformData());
-  await savePlatformData(next);
-  return next;
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(platformSettings)
+      .where(eq(platformSettings.id, "app"))
+      .for("update")
+      .limit(1);
+
+    const current = row ? mergeWithDefaults(row.data as Partial<PlatformData>) : defaults();
+    const next = patch(current);
+
+    await tx
+      .insert(platformSettings)
+      .values({ id: "app", data: next, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: platformSettings.id,
+        set: { data: next, updatedAt: new Date() },
+      });
+
+    return next;
+  });
 }
 
 /* ————————————————————————— resolution ————————————————————————— */

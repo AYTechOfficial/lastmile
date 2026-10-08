@@ -4,6 +4,13 @@ import { AdminNav } from "../admin-nav";
 
 export const metadata = { title: "Admin — LastMile" };
 
+/* Never prerendered, at any level. The panel reads live tables and answers to a
+   session cookie, so a build has nothing honest to render — and a build that
+   tries will hold a database connection while the rest of the pages build, which
+   is exactly how a static-generation attempt turns into a sixty-second timeout
+   on whichever page happens to be waiting behind it. */
+export const dynamic = "force-dynamic";
+
 /* Everything under this layout is the operator panel, and every page in it is
    behind the same door: a panel session, or a signed-in account whose address is
    on the operator list. Checked here rather than per page, so a new page cannot
