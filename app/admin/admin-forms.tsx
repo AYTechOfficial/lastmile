@@ -165,6 +165,7 @@ function ProviderRow({
   const [pinState, pinAction, pinning] = useActionState(setAgentPinsAction, { ok: false });
   const [toggleState, toggleAction, toggling] = useActionState(toggleProviderAction, { ok: false });
   const [deleteState, deleteAction, deleting] = useActionState(deleteProviderAction, { ok: false });
+  const [testState, testAction, testing] = useActionState(testProvidersAction, { ok: false });
   const preset = presets.find((p) => p.id === provider.id);
 
   const measured = health?.models ?? {};
@@ -207,6 +208,12 @@ function ProviderRow({
               <Power className={"h-3.5 w-3.5 " + (provider.enabled ? "text-pass" : "text-t3")} />
             </button>
           </form>
+          <form action={testAction}>
+            <input type="hidden" name="id" value={provider.id} />
+            <button type="submit" disabled={testing} title="Probe this provider's models" className={btn("outline", "sm")}>
+              {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+            </button>
+          </form>
           <button type="button" onClick={() => setOpen((v) => !v)} className={btn("outline", "sm")}>
             <Pencil className="h-3.5 w-3.5" />
           </button>
@@ -227,6 +234,11 @@ function ProviderRow({
       {deleteState.error || deleteState.notice ? (
         <div className="px-4 pb-2">
           <Result state={deleteState} />
+        </div>
+      ) : null}
+      {testState.error || testState.notice ? (
+        <div className="px-4 pb-2">
+          <Result state={testState} />
         </div>
       ) : null}
 

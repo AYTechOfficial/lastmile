@@ -216,9 +216,14 @@ export type TestOutcome = {
 };
 
 /** Probe every model of every enabled provider (or of one provider), measure
-    what comes back, and write it to the catalog. Sequential per provider and
-    bounded in total: a test that hammers twelve hosts at once is a rate-limit
-    generator, and the operator wants latency numbers, not a queue. */
+    what comes back, and write it to the catalog.
+
+    Bounded on all three axes, because this runs inside one serverless request:
+    a small number of models per provider, a short cap per probe (a health check
+    that has not answered in twelve seconds is a failure the operator should
+    see), and a fixed pool of probes in flight — enough parallelism to finish a
+    ten-provider sweep inside the function's budget without turning the test
+    into a rate-limit generator that makes every provider look broken. */
 export async function testProvidersAction(
   _prev: AdminResult,
   formData: FormData,
@@ -243,24 +248,39 @@ export async function testProvidersAction(
     };
   }
 
-  const summary: string[] = [];
+  const probeTimeoutMs = 12_000;
+  const modelsPerProvider = 4;
+  const inFlight = 5;
 
+  const jobs: { provider: (typeof targets)[number]; model: string }[] = [];
   for (const provider of targets) {
-    const apiKey = provider.keyEncrypted
-      ? (decryptSecret(provider.keyEncrypted) ?? "")
-      : (process.env[provider.keyEnv ?? ""] ?? "").trim();
-    if (!apiKey) continue;
+    for (const model of provider.models.slice(0, modelsPerProvider)) {
+      jobs.push({ provider, model });
+    }
+  }
 
-    const perModel: Record<string, { ok: boolean; ms: number; status: number; detail?: string; at: string }> = {};
-    const rows: TestOutcome["models"] = [];
+  const results = new Map<string, { model: string; ok: boolean; ms: number; status: number; detail?: string }[]>();
+  let cursor = 0;
 
-    for (const model of provider.models.slice(0, 6)) {
+  async function worker(): Promise<void> {
+    for (;;) {
+      const index = cursor;
+      cursor += 1;
+      const job = jobs[index];
+      if (!job) return;
+
+      const provider = job.provider;
+      const apiKey = provider.keyEncrypted
+        ? (decryptSecret(provider.keyEncrypted) ?? "")
+        : (process.env[provider.keyEnv ?? ""] ?? "").trim();
+      if (!apiKey) continue;
+
       let probed: ProbeResult;
       try {
         probed = await probeModel(
           { id: provider.id, label: provider.label, baseUrl: provider.baseUrl, apiKey },
-          model,
-          25_000,
+          job.model,
+          probeTimeoutMs,
         );
       } catch (error) {
         probed = {
@@ -271,17 +291,27 @@ export async function testProvidersAction(
           detail: error instanceof Error ? error.message : String(error),
         };
       }
-      rows.push({ model, ok: probed.ok, ms: probed.ms, status: probed.status, detail: probed.detail });
-      perModel[model] = {
-        ok: probed.ok,
-        ms: probed.ms,
-        status: probed.status,
-        detail: probed.detail,
-        at: new Date().toISOString(),
-      };
-    }
 
-    await saveHealth(provider.id, perModel);
+      const rows = results.get(provider.id) ?? [];
+      rows.push({ model: job.model, ok: probed.ok, ms: probed.ms, status: probed.status, detail: probed.detail });
+      results.set(provider.id, rows);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(inFlight, jobs.length) }, () => worker()));
+
+  const summary: string[] = [];
+  const at = new Date().toISOString();
+
+  for (const provider of targets) {
+    const rows = results.get(provider.id);
+    if (!rows || rows.length === 0) continue;
+
+    await saveHealth(
+      provider.id,
+      Object.fromEntries(rows.map((r) => [r.model, { ...r, at }])),
+    );
+
     const working = rows.filter((r) => r.ok).length;
     const fastest = rows.filter((r) => r.ok).sort((a, b) => a.ms - b.ms)[0];
     summary.push(
@@ -291,6 +321,15 @@ export async function testProvidersAction(
 
   refresh();
   return { ok: true, notice: summary.join(" · ") || "Nothing to test." };
+}
+
+/** The health map, as the panel needs it: per model, with the answer and the
+    round-trip. Kept separate from the action so the page can render what the
+    last test recorded without re-running one. */
+export async function providerHealth(): Promise<Record<string, { at: string; best: number | null; models: Record<string, { ok: boolean; ms: number; status: number; detail?: string }> }>> {
+  if (!(await requireAdmin())) return {};
+  const platform = await getPlatformData();
+  return platform.health ?? {};
 }
 
 export async function autoArrangeAction(): Promise<AdminResult> {

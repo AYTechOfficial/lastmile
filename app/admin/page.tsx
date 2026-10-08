@@ -22,6 +22,12 @@ import {
 
 export const metadata = { title: "Admin — LastMile" };
 
+/* Testing the catalog is a sweep of real requests — twelve providers, a few
+   models each — and it runs in this page's own request. The default budget on a
+   serverless plan is seconds, which would cut a sweep off mid-flight and lose
+   the measurements it had already taken. */
+export const maxDuration = 60;
+
 /* The operator panel.
 
    Everything the platform decides lives here, because a configuration that can
