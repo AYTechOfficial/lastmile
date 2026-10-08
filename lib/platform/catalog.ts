@@ -240,7 +240,9 @@ export async function setProviderOrder(ids: string[]): Promise<{ ok: boolean; er
   const full = [...ordered, ...missing];
 
   await updatePlatformData((data) => {
-    const rank = new Map(full.map((id, index) => [id, full.length - index]));
+    /* Same spread-by-10 as the version this replaced: a later hand-edit needs
+       room between the numbers. */
+    const rank = new Map(full.map((id, index) => [id, (full.length - index) * 10]));
     return {
       ...data,
       providers: full

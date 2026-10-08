@@ -381,9 +381,22 @@ export function ProviderCatalog({
     key: serverOrder,
     ids: providers.map((p) => p.id),
   });
+  /* A drag that ends must save what is on screen. Reading the DOM at drag-end
+     raced React's render: the last drop's state update had not reached the
+     rows yet, so the action saved the PREVIOUS arrangement and still reported
+     “Failover order saved”. An orderRef kept beside the state gives the
+     drag-end handler the arrangement synchronously — written by every drop,
+     read only in handlers, never during render. */
+  const orderRef = useRef<string[]>(providers.map((p) => p.id));
   const order = local.key === serverOrder ? local.ids : providers.map((p) => p.id);
-  const setOrder = (update: (current: string[]) => string[]) =>
-    setLocal({ key: serverOrder, ids: update(order) });
+  useEffect(() => {
+    orderRef.current = order;
+  }, [order]);
+  const setOrder = (update: (current: string[]) => string[]) => {
+    const next = update(orderRef.current);
+    orderRef.current = next;
+    setLocal({ key: serverOrder, ids: next });
+  };
   const [dragging, setDragging] = useState<string | null>(null);
   const [notice, setNotice] = useState<AdminResult>({ ok: false });
   const [testing, startTest] = useTransition();
@@ -445,16 +458,15 @@ export function ProviderCatalog({
 
     const onUp = () => {
       setDragging(null);
-      const current = listRef.current;
-      if (current) {
-        const ids = [...current.querySelectorAll<HTMLElement>("[data-provider-id]")].map(
-          (el) => el.dataset.providerId ?? "",
-        );
-        startSaveOrder(async () => {
-          const result = await reorderProvidersAction(ids);
-          setNotice(result);
-        });
-      }
+      /* From the ref, not the DOM — see the comment on orderRef. A drag that
+         ends in the same tick as its last drop still saves what is on screen,
+         and a no-op drag does not write at all. */
+      const ids = orderRef.current;
+      if (ids.length === 0 || ids.join("|") === serverOrder) return;
+      startSaveOrder(async () => {
+        const result = await reorderProvidersAction(ids);
+        setNotice(result);
+      });
     };
 
     window.addEventListener("pointermove", onMove);
