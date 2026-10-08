@@ -192,6 +192,9 @@ export type CommitInput = {
   name: string;
   branch?: string;
   files: { path: string; content: string }[];
+  /** paths to delete in this commit — a rebuild drops the files the previous
+      product left behind instead of inheriting its dead routes */
+  remove?: string[];
   message: string;
 };
 
@@ -302,12 +305,22 @@ export async function commitFiles(input: CommitInput): Promise<CommitResult> {
           that already exists is lost. */
     const parentSha = await latestSha(input.owner, input.name, branch);
     const treeBody = {
-      tree: input.files.map((f, i) => ({
-        path: f.path,
-        mode: "100644" as const,
-        type: "blob" as const,
-        sha: blobs[i].sha,
-      })),
+      tree: [
+        ...input.files.map((f, i) => ({
+          path: f.path,
+          mode: "100644" as const,
+          type: "blob" as const,
+          sha: blobs[i].sha,
+        })),
+        /* Deleting a path is a tree entry with a null sha — the documented way
+           to drop a file while keeping everything else the branch holds. */
+        ...(input.remove ?? []).map((p) => ({
+          path: p,
+          mode: "100644" as const,
+          type: "blob" as const,
+          sha: null,
+        })),
+      ],
       ...(parentSha ? { base_tree: parentSha } : {}),
     };
     const treeRes = await fetch(`${API}/repos/${input.owner}/${input.name}/git/trees`, {
