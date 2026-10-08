@@ -30,6 +30,17 @@ export async function directCredentialsSignIn(
   try {
     const result = await signIn("credentials", { email, password, redirect: false });
     if (!result || result.error) {
+      /* The server distinguishes a blocked account from a wrong password, and
+         the form repeats the distinction: "invalid credentials" for someone
+         who typed the right password and was refused is a lie that costs them
+         an afternoon. */
+      const code = (result as { code?: string } | undefined)?.code;
+      if (code === "suspended") {
+        return {
+          ok: false,
+          error: "This account is suspended, so sign-in is refused. An operator can lift the block.",
+        };
+      }
       return { ok: false, error: "Invalid email or password." };
     }
     /* Navigation belongs to the caller, which owns the router — pushing keeps

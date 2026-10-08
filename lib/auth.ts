@@ -1,4 +1,4 @@
-import NextAuth from "next-auth";
+import NextAuth, { CredentialsSignin } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import GitHub from "next-auth/providers/github";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
@@ -18,6 +18,14 @@ import { planOf, type PlanId } from "./plans";
    route to and how many iterations its quality loop gets. Resolving it from the
    session at the point of use keeps that decision server-side, where a client
    cannot escalate it. */
+
+/** A blocked account is not a wrong password. Auth.js maps a thrown
+    `CredentialsSignin` to `result.code`, which is the only channel that reaches
+    the form — so the block travels as its own code rather than as prose that
+    would be flattened into "invalid credentials". */
+class SuspendedAccount extends CredentialsSignin {
+  code = "suspended";
+}
 
 export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
   adapter: DrizzleAdapter(db, {
@@ -64,11 +72,12 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
         if (!user?.passwordHash) return null;
 
         /* An operator can block an account, and a block that only hides pages
-           is theatre: the password is still checked, but the session is never
-           issued. The message says "suspended" rather than "wrong password" so
-           a blocked person is not sent hunting for a typo that does not exist. */
+           is theatre: the password is checked first, then the block refuses the
+           session. The failure carries its own code so the form can say the
+           account is suspended instead of sending a blocked person hunting for
+           a typo in a password that was never wrong. */
         if (user.suspendedAt) {
-          throw new Error("This account is suspended. Contact the operator if you think that is wrong.");
+          throw new SuspendedAccount();
         }
 
         const ok = await bcrypt.compare(password, user.passwordHash);
