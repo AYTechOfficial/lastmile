@@ -659,8 +659,13 @@ export async function probeModel(
     [{ role: "user", content: "Reply with the single word OK and nothing else." }],
     timeoutMs,
     false,
-    /* One word back: a probe must not pay for a completion the size of a page. */
-    16,
+    /* The production cap, deliberately. A tight cap (16 tokens) looked like a
+       cheap health check and was a lying one: a reasoning model spends its
+       first tokens thinking, returns HTTP 200 with an empty message, and is
+       reported as down while it is working perfectly. Cost is decided by the
+       answer, not the cap — a one-word reply is a few tokens either way — so
+       the probe asks exactly what a real call asks. */
+    16_384,
   );
   return {
     ok: result.ok,

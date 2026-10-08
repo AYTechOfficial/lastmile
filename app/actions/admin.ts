@@ -3,6 +3,7 @@
 import { desc, eq, ilike, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth, isAdminEmail } from "@/lib/auth";
+import { panelAccess } from "@/lib/platform/admin-auth";
 import { db } from "@/lib/db";
 import { runs, users } from "@/lib/schema";
 import { getPlatformData, updatePlatformData } from "@/lib/platform/settings";
@@ -24,19 +25,27 @@ import { logEvent } from "@/lib/events";
 import { cancelQueuedForRun } from "@/lib/queue";
 import type { ModelTier, PlanId } from "@/lib/plans";
 
-/* Operator-only actions. Every one re-checks the admin email server-side — the
-   admin NAV being hidden in the shell is presentation, not security.
+/* Operator-only actions. Every one re-checks access server-side — the panel is
+   behind its own login, and the NAV being hidden is presentation, not security.
 
    The shape of the panel decides the shape of these: the provider list is
    edited in place (so there is a save action rather than a wizard), probed by a
    button (so testing is its own action), and reordered by dragging (so the
    order arrives as a list of ids, not as a form field per row). */
 
-async function requireAdmin(): Promise<string | null> {
-  const session = await auth();
-  const email = session?.user?.email ?? null;
-  if (!session?.user?.id || !isAdminEmail(email)) return null;
-  return session.user.id;
+/** Who is acting: a panel session has no user row behind it, an operator
+    account does. The id is what lets "you cannot delete yourself" mean
+    something without breaking the panel path. */
+type AdminActor = { label: string; userId: string | null };
+
+async function requireAdmin(): Promise<AdminActor | null> {
+  const access = await panelAccess();
+  if (!access.ok) return null;
+  if (access.as === "operator") {
+    const session = await auth();
+    return { label: access.label, userId: session?.user?.id ?? null };
+  }
+  return { label: access.label, userId: null };
 }
 
 export type AdminResult = { ok: boolean; error?: string; notice?: string };
@@ -448,7 +457,9 @@ export async function deleteAccountAction(
 
   const id = String(formData.get("id") ?? "").trim();
   if (!id) return { ok: false, error: "No account given." };
-  if (id === admin) return { ok: false, error: "You cannot delete the account you are signed in as." };
+  if (admin.userId && id === admin.userId) {
+    return { ok: false, error: "You cannot delete the account you are signed in as." };
+  }
 
   const [target] = await db
     .select({ email: users.email })

@@ -87,10 +87,30 @@ export type ProviderHealth = {
 
 export type CatalogHealth = Record<string, ProviderHealth>;
 
+/** The operator panel's own credentials.
+
+    Held apart from any user account on purpose: the panel is a separate door,
+    so losing a user password or being blocked as a user cannot take the
+    platform's controls away, and an operator does not need a second account in
+    the product to administer it. Only hashes are stored — the plaintext exists
+    the moment it is typed and never again. `code` is an optional second factor:
+    null means the login asks for nothing beyond the password. */
+export type AdminAuthConfig = {
+  username: string;
+  passwordHash: string;
+  /** optional extra code the login must also get right */
+  codeHash: string | null;
+  /** bumped on every credential change, so old sessions stop being accepted */
+  generation: number;
+  updatedAt: string;
+};
+
 export type PlatformData = {
   providers: ProviderEntry[];
   /** what the last Test found, keyed by provider id */
   health?: CatalogHealth;
+  /** the panel's own login, once an operator has set one */
+  admin?: AdminAuthConfig | null;
   infra: InfraEntry;
   /** which tier each plan routes to — the operator's switch */
   policy: Record<PlanId, ModelTier>;
@@ -156,7 +176,11 @@ const ENV_DEFAULTS: ProviderEntry[] = [
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
     keyEncrypted: null,
     keyEnv: "GEMINI_API_KEY",
-    models: ["gemini-2.5-flash"],
+    /* Measured 2026-10-08 against this account's key: 2.5-flash answers 404
+       (“no longer available to new users”) and so does 2.5-flash-lite, while
+       these three answer in 2–3s. A retired default is not a neutral mistake —
+       it burns a rung of every failover cascade that reaches this provider. */
+    models: ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-lite-latest"],
     tier: "free",
     enabled: true,
     priority: 60,
@@ -195,12 +219,18 @@ const ENV_DEFAULTS: ProviderEntry[] = [
     baseUrl: "https://integrate.api.nvidia.com/v1",
     keyEncrypted: null,
     keyEnv: "NVIDIA_API_KEY",
-    models: ["nvidia/llama-3.3-nemotron-super-49b-v1"],
+    /* NVIDIA rotates this catalog hard: the previous default
+       (nvidia/llama-3.3-nemotron-super-49b-v1) now answers 410, and the first
+       four replacements answered 410, 404 or nothing within 25s. These two at
+       least exist on the account today, and they are slow — which is why this
+       provider sits low in the order and why the panel's Test button is the
+       right way to pick a model here rather than trusting a list. */
+    models: ["deepseek-ai/deepseek-v4.1-flash", "google/gemma-4-31b-it"],
     tier: "free",
     enabled: true,
     priority: 40,
     agents: {},
-    notes: "40 req/min, hosted by NVIDIA",
+    notes: "models rotate — test before relying on it",
   },
   {
     id: "cerebras",
@@ -234,7 +264,11 @@ const ENV_DEFAULTS: ProviderEntry[] = [
     baseUrl: "https://api.groq.com/openai/v1",
     keyEncrypted: null,
     keyEnv: "GROQ_API_KEY",
-    models: ["openai/gpt-oss-120b"],
+    /* Measured 2026-10-08: qwen3.8-27b answers in 171ms, gpt-oss-120b in 505ms.
+       It stays last in the default order — being fast is not the same as being
+       good — but it is a real answering rung, and auto-arrange is free to move
+       it up the moment measurements say so. */
+    models: ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"],
     tier: "free",
     enabled: true,
     priority: 10,
@@ -247,6 +281,7 @@ function defaults(): PlatformData {
   return {
     providers: ENV_DEFAULTS,
     health: {},
+    admin: null,
     infra: {
       githubTokenEncrypted: null,
       vercelTokenEncrypted: null,
@@ -310,6 +345,7 @@ function mergeWithDefaults(stored: Partial<PlatformData>): PlatformData {
     infra: { ...base.infra, ...(stored.infra ?? {}) },
     policy: { ...base.policy, ...(stored.policy ?? {}) },
     health: stored.health ?? {},
+    admin: stored.admin ?? null,
     credits: {
       ...base.credits,
       ...(stored.credits ?? {}),

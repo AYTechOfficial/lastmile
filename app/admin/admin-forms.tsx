@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { Badge, Panel, btn } from "@/components/kit";
+import { saveAdminCredentialsAction } from "@/app/actions/admin-auth";
 import {
   adminStopRunAction,
   autoArrangeAction,
@@ -38,7 +39,7 @@ import type { ProviderPreset } from "@/lib/platform/catalog";
 const inputCls =
   "w-full rounded-[10px] border border-edge bg-well px-3.5 py-2.5 text-[13.5px] text-t1 outline-none transition-colors placeholder:text-t3 focus:border-brand/60";
 
-function Result({ state }: { state: AdminResult }) {
+function Result({ state }: { state: { error?: string; notice?: string } }) {
   if (state.error) {
     return (
       <p role="alert" className="flex items-start gap-2 text-[12px] text-bad">
@@ -742,6 +743,108 @@ export function AccountList({ accounts }: { accounts: AccountRowData[] }) {
         shown.map((a) => <AccountRow key={a.id} account={a} />)
       )}
     </Panel>
+  );
+}
+
+/* ————————————————————————— testing ————————————————————————— */
+
+/** The sweep, on its own page: test everything, then arrange the catalog by
+    what the sweep measured. Kept apart from the provider list so an operator
+    can look at health without scrolling past twelve edit forms. */
+export function TestingControls() {
+  const [state, setState] = useState<AdminResult>({ ok: false });
+  const [testing, startTest] = useTransition();
+  const [arranging, startArrange] = useTransition();
+
+  return (
+    <Panel className="p-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="mr-auto">
+          <p className="text-[13px] font-medium text-t1">Run a sweep</p>
+          <p className="mt-1 text-[11.5px] text-t3">
+            {testing ? "Probing every enabled provider — this takes a few seconds…" : "One request per model, results saved below."}
+          </p>
+        </div>
+        <form
+          action={(formData) => {
+            startTest(async () => {
+              setState(await testProvidersAction({ ok: false }, formData));
+            });
+          }}
+        >
+          <button type="submit" disabled={testing || arranging} className={btn("brand", "md")}>
+            {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+            {testing ? "Probing…" : "Test all providers"}
+          </button>
+        </form>
+        <form
+          action={() => {
+            startArrange(async () => {
+              setState(await autoArrangeAction());
+            });
+          }}
+        >
+          <button type="submit" disabled={testing || arranging} className={btn("outline", "md")}>
+            {arranging ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {arranging ? "Arranging…" : "Auto-arrange by speed"}
+          </button>
+        </form>
+      </div>
+      {state.error || state.notice ? (
+        <div className="mt-3 border-t border-edge pt-3">
+          <Result state={state} />
+        </div>
+      ) : null}
+    </Panel>
+  );
+}
+
+/* ————————————————————————— panel credentials ————————————————————————— */
+
+/** The panel's own username, password and optional access code. Everything here
+    is a hash at rest, and saving logs every other device out — which is the
+    point of a credential change. */
+export function AdminCredentialsForm({
+  username,
+  requiresCode,
+}: {
+  username: string;
+  requiresCode: boolean;
+}) {
+  const [state, action, pending] = useActionState(saveAdminCredentialsAction, {});
+  return (
+    <form action={action} className="space-y-3.5">
+      <label className="block">
+        <span className="eyebrow eyebrow-strong mb-1.5 block">Username</span>
+        <input name="username" defaultValue={username} required className={inputCls} />
+      </label>
+      <label className="block">
+        <span className="eyebrow eyebrow-strong mb-1.5 block">New password (blank keeps the current one)</span>
+        <input name="password" type="password" autoComplete="new-password" placeholder="••••••••" className={inputCls} />
+      </label>
+      <label className="block">
+        <span className="eyebrow eyebrow-strong mb-1.5 block">
+          Access code {requiresCode ? "— currently required at sign-in" : "— optional"}
+        </span>
+        <input name="code" placeholder="leave blank for none" className={inputCls} />
+        <span className="mt-1 block text-[11px] text-t3">
+          An extra code the login asks for after the password. Useful when the panel is on a public address.
+        </span>
+      </label>
+      {requiresCode ? (
+        <label className="flex items-center gap-2">
+          <input type="checkbox" name="clearCode" className="h-4 w-4" style={{ accentColor: "var(--color-brand, #4f8cff)" }} />
+          <span className="text-[12.5px] text-t2">Remove the access code entirely</span>
+        </label>
+      ) : null}
+      <div className="flex items-center justify-between gap-3">
+        <Result state={state} />
+        <button type="submit" disabled={pending} className={btn("brand", "sm", "ml-auto")}>
+          {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+          Save credentials
+        </button>
+      </div>
+    </form>
   );
 }
 
