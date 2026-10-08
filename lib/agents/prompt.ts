@@ -235,11 +235,11 @@ OUT OF SCOPE: ${spec.scope.out.join("; ")}
 
 Write plain prose — the actual brief a developer would follow. Cover, in order:
 1. What is being built and the one thing it must do better than the alternatives.
-2. The design language: exact colour values, one font, the spacing rhythm, and what the empty state looks like.
+2. The design language — this is a FIRST-CLASS requirement, not decoration. Choose a palette that fits THIS product's brand (a cafe is warm and appetising, a dev tool is cool and precise — never a generic dark dashboard for everything), with exact hex values for background, surface, primary text, accent and one supporting tint. Pick a real font pairing (a display face for headings, a readable body face) from Google Fonts. Describe the hero or header treatment, the card/surface style (borders, shadows, radii), and one signature visual element (a gradient, a pattern, an illustrated motif) that makes the page memorable. Rich imagery is required: use real photos from https://images.unsplash.com with topic-appropriate queries, or layered CSS gradients and inline SVG illustration where photos do not fit — never a bare page of grey boxes.
 3. Each page and what a person sees and can do on it.
 4. The data model and how state persists between reloads.
 5. The edge cases that must not break: empty lists, very long text, a reload mid-flow, a failed action.
-6. The quality bar: what would make this look unfinished.
+6. The quality bar: the page must look like a funded startup shipped it. Micro-interactions on hover and focus, smooth transitions, generous whitespace, visual hierarchy with a clear primary action, responsive down to mobile, and an empty state that still looks designed. A reviewer who says "this looks generic or unfinished" must be wrong.
 
 Be specific and imperative. Do not include JSON. Reply with the instructions only.`,
     },
@@ -266,18 +266,21 @@ Be specific and imperative. Do not include JSON. Reply with the instructions onl
 
 /* ————————————————————————— assembly ————————————————————————— */
 
-/** A fixed, defensible design system. Not model-generated on purpose: the look
-    is a product decision, and letting a model re-pick it per run produces
-    inconsistent output and an unpredictable quality bar. */
+/** The fallback design system — used only when the model's prose is unavailable.
+    It is deliberately neutral rather than opinionated: the per-product design
+    language comes from the instructions themselves (palette fitted to the
+    brand, real imagery, a signature visual element), and a fixed dark-engineering
+    look stamped over every product was how a cafe booking site came out looking
+    like a terminal. */
 const DESIGN: DesignSystem = {
-  look: "dark, dense, engineering-tool aesthetic — monospace for data, a single accent colour, no gradients on content surfaces",
+  look: "fit the design to the product's own brand per the instructions — real imagery, layered surfaces, one memorable signature element",
   colors: {
-    background: "#0b0d10",
-    surface: "#14171c",
-    primary: "#e6e9ef",
+    background: "#faf9f7",
+    surface: "#ffffff",
+    primary: "#1a1d21",
     accent: "#4f8cff",
   },
-  font: "Inter for UI, JetBrains Mono for numbers and ids",
+  font: "a display face for headings plus a readable body face, loaded from Google Fonts",
 };
 
 function assembleMasterPrompt(args: {
@@ -326,6 +329,13 @@ function assembleMasterPrompt(args: {
     "Every interactive control has a visible focus state",
     "Numbers and ids use a monospace face so columns align",
     "The first screen is usable with no account and no data",
+    /* The visual bar is stated as defects a reviewer can name, because that is
+       how it gets enforced: the live review fails bland UI back to the coder. */
+    "The palette must fit the product's brand — a generic dark dashboard on a cafe or food product is a defect",
+    "The hero or header must land instantly: display typography, layered surfaces, real imagery or signature illustration — not a bare heading on a flat background",
+    "Real visual assets are mandatory: topic-fit photos from images.unsplash.com or crafted inline SVG — never a page of unstyled grey boxes",
+    "Hover states, transitions and visual hierarchy must be present on every interactive surface",
+    "The whole page must hold together responsively down to a phone viewport",
     ...spec.productionChecklist.slice(0, 3),
   ];
 

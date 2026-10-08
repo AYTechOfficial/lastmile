@@ -26,6 +26,7 @@
 
 import type { PlanId } from "../plans";
 import { resolveServiceCredential } from "../platform/services";
+import { getPlatformData } from "../platform/settings";
 
 export type BrowserMode = "cloud" | "local";
 
@@ -56,7 +57,11 @@ export async function planBrowser(
 ): Promise<BrowserPlan> {
   const baseUrl = (process.env.BROWSER_USE_BASE_URL ?? DEFAULT_CLOUD_BASE).replace(/\/+$/, "");
 
-  if (plan !== "pro") {
+  /* The operator's switch: the cloud session costs money, so by default it is
+     a Pro feature — but the panel can open it to every run. Read fresh, so
+     flipping the toggle applies to the next job with no deploy. */
+  const { liveBrowser } = await getPlatformData();
+  if (plan !== "pro" && liveBrowser?.cloudForAll !== true) {
     return {
       mode: "local",
       label: "local chromium (embedded)",
@@ -76,7 +81,10 @@ export async function planBrowser(
       apiKey: null,
       baseUrl,
       presentation: "embedded-local",
-      reason: "Pro plan, but no cloud browser key is configured — falling back to the embedded local browser",
+      reason:
+        plan !== "pro"
+          ? "cloud browser for all is on, but no cloud browser key is configured — falling back to the embedded local browser"
+          : "Pro plan, but no cloud browser key is configured — falling back to the embedded local browser",
     };
   }
 
@@ -88,8 +96,10 @@ export async function planBrowser(
     presentation: "cloud-session",
     reason:
       source === "user"
-        ? "Pro plan with your own cloud browser key"
-        : "Pro plan on the platform's cloud browser",
+        ? "your own cloud browser key — the session's live view is on the run page"
+        : plan !== "pro"
+          ? "cloud browser opened to all runs by the operator — the session's live view is on the run page"
+          : "the platform's cloud browser — the session's live view is on the run page",
   };
 }
 

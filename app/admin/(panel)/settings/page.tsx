@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { adminAuthState, adminUsesDefaultPassword } from "@/lib/platform/admin-auth";
 import { getPlatformData } from "@/lib/platform/settings";
-import { AdminCredentialsForm, InfraForm, PolicyForm } from "../../admin-forms";
+import { AdminCredentialsForm, CloudBrowserToggle, InfraForm, PolicyForm } from "../../admin-forms";
 import { SectionCard } from "../charts";
 
 export const metadata = { title: "Settings — LastMile Admin" };
@@ -51,6 +51,13 @@ export default async function AdminSettingsPage() {
             This is the switch that keeps a free run on free models and a Pro run on the premium catalog. It
             applies to the next job, with no deploy.
           </p>
+        </SectionCard>
+
+        <SectionCard
+          title="Live verification browser"
+          hint="whose browser drives the Live QA stage"
+        >
+          <CloudBrowserToggle enabled={platform.liveBrowser?.cloudForAll === true} />
         </SectionCard>
 
         <SectionCard

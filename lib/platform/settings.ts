@@ -115,6 +115,11 @@ export type PlatformData = {
   infra: InfraEntry;
   /** which tier each plan routes to — the operator's switch */
   policy: Record<PlanId, ModelTier>;
+  /** live-QA browser policy — whether free runs get the cloud browser too */
+  liveBrowser?: {
+    /** when true, every run's verification runs in the cloud browser with a live view on the run page */
+    cloudForAll: boolean;
+  };
   /** credit economy — both values in milli-USD, editable in the admin panel */
   credits: {
     /** what 1,000,000 tokens cost a user, e.g. 1000 = $1.00 */
@@ -289,6 +294,7 @@ function defaults(): PlatformData {
       vercelTeamId: process.env.VERCEL_TEAM_ID ?? null,
     },
     policy: { free: "free", pro: "premium" },
+    liveBrowser: { cloudForAll: false },
     credits: {
       pricePerMillionMilli: DEFAULT_PRICE_PER_MILLION_MILLI,
       freeGrantMilli: DEFAULT_FREE_GRANT_MILLI,
@@ -340,6 +346,9 @@ function mergeWithDefaults(stored: Partial<PlatformData>): PlatformData {
         : base.providers,
     infra: { ...base.infra, ...(stored.infra ?? {}) },
     policy: { ...base.policy, ...(stored.policy ?? {}) },
+    liveBrowser: {
+      cloudForAll: stored.liveBrowser?.cloudForAll === true,
+    },
     health: stored.health ?? {},
     admin: stored.admin ?? null,
     credits: {

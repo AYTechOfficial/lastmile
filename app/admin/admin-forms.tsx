@@ -25,6 +25,7 @@ import {
   reorderProvidersAction,
   saveProviderAction,
   setAgentPinsAction,
+  setCloudBrowserForAllAction,
   setCreditPricingAction,
   setInfraAction,
   setPolicyAction,
@@ -888,6 +889,37 @@ export function PolicyForm({ free, pro }: { free: string; pro: string }) {
         <button type="submit" disabled={pending} className={btn("brand", "sm", "ml-auto")}>
           {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
           Save policy
+        </button>
+      </div>
+    </form>
+  );
+}
+
+export function CloudBrowserToggle({ enabled }: { enabled: boolean }) {
+  const [state, action, pending] = useActionState(setCloudBrowserForAllAction, { ok: false });
+  return (
+    <form action={action} className="space-y-3.5">
+      <p className="text-[13px] font-medium text-t1">Live verification browser</p>
+      <label className="flex items-start gap-3">
+        <input
+          type="checkbox"
+          name="cloudForAll"
+          value="true"
+          defaultChecked={enabled}
+          className="mt-0.5 h-4 w-4"
+          style={{ accentColor: "var(--color-brand, #4f8cff)" }}
+        />
+        <span className="text-[12.5px] leading-relaxed text-t2">
+          Cloud browser for ALL runs — free included. Every verification then runs in a real cloud session whose
+          live view streams on the run page, instead of invisible headless checks. Costs a cloud session per
+          test round.
+        </span>
+      </label>
+      <div className="flex items-center justify-between gap-3">
+        <Result state={state} />
+        <button type="submit" disabled={pending} className={btn("brand", "sm", "ml-auto")}>
+          {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+          Save browser setting
         </button>
       </div>
     </form>

@@ -368,6 +368,29 @@ export async function setPolicyAction(_prev: AdminResult, formData: FormData): P
   return { ok: true, notice: `Policy saved — Free runs on the ${free} catalog, Pro on the ${pro} catalog.` };
 }
 
+/** Whether every run — free included — verifies in the cloud browser with its
+    live view on the run page. The cloud session costs the operator money per
+    session, which is why it is a switch rather than a default. */
+export async function setCloudBrowserForAllAction(
+  _prev: AdminResult,
+  formData: FormData,
+): Promise<AdminResult> {
+  if (!(await requireAdmin())) return { ok: false, error: "Admins only." };
+
+  const cloudForAll = String(formData.get("cloudForAll") ?? "") === "true";
+  await updatePlatformData((current) => ({
+    ...current,
+    liveBrowser: { cloudForAll },
+  }));
+  refresh();
+  return {
+    ok: true,
+    notice: cloudForAll
+      ? "Cloud browser for all runs — every verification now streams its live view on the run page."
+      : "Cloud browser is Pro-only again — free runs verify in the embedded local browser.",
+  };
+}
+
 export async function setInfraAction(_prev: AdminResult, formData: FormData): Promise<AdminResult> {
   const admin = await requireAdmin();
   if (!admin) return { ok: false, error: "Admins only." };
