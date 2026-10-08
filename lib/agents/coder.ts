@@ -497,8 +497,26 @@ async function askModel(
         `  model ${attempt.provider}/${attempt.model} ${attempt.ok ? "answered" : `failed (${attempt.detail ?? "unknown"})`} in ${Math.round(attempt.ms / 1000)}s`,
       );
     },
-  };  const prompt = input.firstPass ? buildPrompt(input) : fixPrompt(input, await loadFixContext(input));
+  };
 
+  if (!input.firstPass) {
+    /* Fix rounds are coded IN PASSES: the named files are grouped two per
+       call, and each call sees only its own files' contents. Reasoning models
+       size their thinking to the prompt — a small ask gets a full answer in
+       seconds, a huge one burns the whole output budget and returns nothing —
+       so the pass count is bounded, not the prompt size. One pass failing
+       costs one pass; the others still land. */
+    const grouped = await fixInPasses(input, chatInput);
+    return {
+      ok: grouped.files.length > 0,
+      files: grouped.files,
+      tokens: grouped.tokens,
+      ms: Date.now() - started,
+      reason: grouped.files.length === 0 ? grouped.reason ?? "every fix pass failed" : undefined,
+    };
+  }
+
+  const prompt = buildPrompt(input);
   const { value, result, parseError } = await chatJson<{ files?: GeneratedFile[] }>(chatInput, [
     {
       role: "system",
@@ -518,6 +536,86 @@ async function askModel(
   }
 
   return { ok: true, files, tokens: result.tokens, ms: Date.now() - started };
+}
+
+/* ————————————————————————— fix passes ————————————————————————— */
+
+const PASS_MAX_FILES = 2;
+
+/* A pass is only worthwhile when the model can see what it is fixing, so the
+   context of each pass is strictly bounded: its own files' current contents
+   (truncated per file), and the shared kit only when one of the pass's files
+   imports from it. */
+async function fixInPasses(
+  input: CodeInput,
+  chatInput: ChatInput,
+): Promise<{ files: GeneratedFile[]; tokens: number; reason?: string }> {
+  const context = await loadFixContext(input);
+  if (context.files.length === 0 && !(input.continueRequest || input.issuesText)) {
+    return { files: [], tokens: 0, reason: "nothing to fix was named and the repo has no matching files" };
+  }
+
+  const allNamed = [...new Set([...(input.files ?? []), ...context.files.map((f) => f.path)])];
+  const passes: string[][] = [];
+  let current: string[] = [];
+  for (const path of allNamed.slice(0, 10)) {
+    current.push(path);
+    if (current.length >= PASS_MAX_FILES) {
+      passes.push(current);
+      current = [];
+    }
+  }
+  if (current.length > 0) passes.push(current);
+  if (passes.length === 0 && (input.continueRequest || input.issuesText)) passes.push([]);
+
+  const emitted: GeneratedFile[] = [];
+  let tokens = 0;
+  let passFailures = 0;
+  for (let i = 0; i < passes.length; i += 1) {
+    const passFiles = passes[i];
+    const scoped = context.files.filter((f) => passFiles.length === 0 || passFiles.includes(f.path));
+    const effective: string[] = scoped.length > 0 ? scoped.map((f) => f.path) : passFiles;
+    const passContext = scoped.length > 0 || passFiles.length === 0 ? { files: scoped, kit: context.kit } : { files: [], kit: null };
+    const prompt = fixPrompt({ ...input, files: effective }, passContext);
+
+    await input.emit("info", `-> fix pass ${i + 1}/${passes.length}: ${effective.length > 0 ? effective.join(", ") : "(continue request)"}`);
+
+    const { value, result } = await chatJson<{ files?: GeneratedFile[] }>(chatInput, [
+      {
+        role: "system",
+        content:
+          "You are a senior front-end engineer. You write complete, working Next.js App Router code. You never write placeholders, TODOs, or comments explaining what code should do — you write the code. Think briefly, then answer — your reply budget is finite and the code matters more than deliberation.",
+      },
+      { role: "user", content: prompt },
+    ]);
+
+    if (result.attempts.length > 0) {
+      for (const a of result.attempts.slice(-1)) {
+        await input.emit(
+          a.ok ? "success" : "warn",
+          `  pass ${i + 1}: model ${a.provider}/${a.model} ${a.ok ? "answered" : `failed (${a.detail ?? "unknown"})`} in ${Math.round(a.ms / 1000)}s`,
+        );
+      }
+    }
+
+    if (!result.ok || !value) {
+      passFailures += 1;
+      continue;
+    }
+    const files = sanitize(value.files ?? []);
+    if (files.length === 0) {
+      await input.emit("warn", `  pass ${i + 1}: no usable files — moving to the next pass`);
+      passFailures += 1;
+      continue;
+    }
+    tokens += result.tokens;
+    for (const f of files) emitted.push(f);
+  }
+  return {
+    files: emitted,
+    tokens,
+    reason: passFailures === passes.length ? "no pass produced usable files" : undefined,
+  };
 }
 
 function buildPrompt(input: CodeInput): string {
