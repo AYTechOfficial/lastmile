@@ -20,29 +20,44 @@ export type AccountView = {
   spendMilli: number;
 };
 
+/* One statement, aliased, rather than three correlated subqueries written
+   through the query builder: an unqualified column id inside a subquery about
+   `runs` resolves to the runs table's own id, not the user's, so every account
+   read as "0 runs, 0 tokens" while the runs page showed the real totals. The
+   join cannot express that mistake. */
 export async function accountsWithUsage(limit = 200): Promise<AccountView[]> {
-  const rows = await db
-    .select({
-      id: users.id,
-      email: users.email,
-      name: users.name,
-      plan: users.plan,
-      credits: users.creditsMilli,
-      suspendedAt: users.suspendedAt,
-      createdAt: users.createdAt,
-      runs: sql<number>`(select count(*)::int from lastmile.runs r where r.user_id = ${users.id})`,
-      tokens: sql<number>`(select coalesce(sum(r.tokens), 0)::int from lastmile.runs r where r.user_id = ${users.id})`,
-      spendMilli: sql<number>`(select coalesce(sum(c.delta_milli), 0)::int from lastmile.credit_events c where c.user_id = ${users.id} and c.delta_milli < 0)`,
-    })
-    .from(users)
-    .orderBy(desc(users.createdAt))
-    .limit(limit);
+  const rows = await db.execute(sql`
+    select u.id,
+           u.email,
+           u.name,
+           u.plan,
+           u.credits_milli,
+           u.suspended_at,
+           u.created_at,
+           count(r.id)::int as runs,
+           coalesce(sum(r.tokens), 0)::int as tokens,
+           coalesce((
+             select -sum(c.delta_milli)::int from lastmile.credit_events c
+              where c.user_id = u.id and c.delta_milli < 0
+           ), 0)::int as spend_milli
+      from lastmile."user" u
+      left join lastmile.runs r on r.user_id = u.id
+     group by u.id
+     order by u.created_at desc
+     limit ${limit}
+  `);
 
-  return rows.map((r) => ({
-    ...r,
-    spendMilli: Math.abs(r.spendMilli),
-    suspendedAt: r.suspendedAt ? r.suspendedAt.toISOString() : null,
-    createdAt: r.createdAt.toISOString(),
+  return (rows as unknown as Record<string, unknown>[]).map((r) => ({
+    id: String(r.id),
+    email: (r.email as string | null) ?? null,
+    name: (r.name as string | null) ?? null,
+    plan: String(r.plan),
+    credits: Number(r.credits_milli ?? 0),
+    suspendedAt: r.suspended_at ? new Date(r.suspended_at as string).toISOString() : null,
+    createdAt: new Date(r.created_at as string).toISOString(),
+    runs: Number(r.runs ?? 0),
+    tokens: Number(r.tokens ?? 0),
+    spendMilli: Math.abs(Number(r.spend_milli ?? 0)),
   }));
 }
 
