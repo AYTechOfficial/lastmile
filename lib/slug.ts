@@ -7,6 +7,11 @@
 const STOP = new Set([
   "a", "an", "the", "for", "with", "of", "to", "and", "in", "on", "my",
   "that", "which", "app", "application", "tool", "platform", "website", "site",
+  /* The verbs of asking, not the thing asked for: "build me an xyz game" is
+     about xyz-game, so the request scaffolding must never reach the slug —
+     that is how runs ended up named "build-xyz-game". */
+  "build", "built", "create", "creating", "make", "making", "want", "need",
+  "using", "use", "called", "named", "like",
 ]);
 
 /** Repo-safe, DNS-safe, three words at most. Never empty. */

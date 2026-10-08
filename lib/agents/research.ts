@@ -63,9 +63,10 @@ export type ResearchResult = {
 
 const DEFAULT_BUDGET = 8 * 60_000;
 
-/** The queries the agent asks. Deliberately six fixed angles rather than a
-    model-written query set: the first version of a pipeline should not depend
-    on the thing it is measuring, and these six cover the brief's sections. */
+/** The queries the agent asks when the model could not be asked to plan them.
+    A template, and it reads like one — which is exactly why the model-planned
+    set above it exists. Kept as the degradation rung so search still works
+    when no model answers. */
 function querySet(sentence: string, subject: string): { query: string; why: string }[] {
   /* Each query is deliberately short. The keyed engines cope with a phrase, but
      the keyless rungs behind them are keyword indexes, and a five-word question
@@ -96,20 +97,106 @@ function subjectOf(sentence: string): string {
   return cleaned || sentence.trim().toLowerCase();
 }
 
+/* ————————————————————————— query planning ————————————————————————— */
+
+export type PlannedQuery = { query: string; why: string };
+
+/** The model decides what to search. The old version built queries from a
+    regex that stripped scaffolding words off the sentence — "build a triple A
+    website" came out as "triple pricing" — and every downstream stage inherited
+    that stupidity. Now a model reads the sentence, extracts the actual subject
+    and writes the search angles itself; the template set is only the fallback
+    for when no model answers, which the run reports honestly. */
+export async function planQueries(
+  input: ResearchInput,
+  sentence: string,
+  deadline: number,
+): Promise<{ subject: string; queries: PlannedQuery[] } | null> {
+  const prompt = `A user asked for this product: "${sentence}"
+
+Write the web searches that will map this market. Rules:
+- 5 to 6 queries, each 2 to 4 words, lower-case, no quotes, no search operators.
+- Extract the ACTUAL SUBJECT — the product type or domain the user wants — and search that, never the request scaffolding. "Build a triple A website" is about AAA game websites, so search "aaa game website", not "build website". "Build me a CRM for photographers" searches "photographer CRM".
+- Cover who the competitors are, what they charge, and whether anyone wants this.
+- A query no search engine could match is worthless: name real things, not abstractions.
+
+Reply with ONLY a JSON object of this shape, no prose and no markdown fences:
+
+{"subject": "two or three words naming the product domain", "queries": [{"query": "", "why": ""}]}`;
+
+  try {
+    const { value, result, parseError } = await chatJson<{
+      subject?: unknown;
+      queries?: { query?: unknown; why?: unknown }[];
+    }>(
+      {
+        tier: input.plan.modelTier,
+        userId: input.userId,
+        agent: "research",
+        preferred: input.preferredModel ?? defaultModelFor(input.plan.modelTier),
+        timeoutMs: Math.max(15_000, Math.min(45_000, deadline - Date.now())),
+        maxRungs: 4,
+        onAttempt: async (attempt) => {
+          await input.emit(
+            attempt.ok ? "success" : "warn",
+            `  query planner ${attempt.provider}/${attempt.model} ${attempt.ok ? "answered" : `failed (${attempt.detail ?? "unknown"})`}`,
+          );
+        },
+      },
+      [
+        { role: "system", content: "You turn product requests into precise, minimal web search queries." },
+        { role: "user", content: prompt },
+      ],
+    );
+
+    if (!result.ok || !value) {
+      void parseError;
+      return null;
+    }
+
+    const subject = typeof value.subject === "string" ? value.subject.trim().slice(0, 80) : "";
+    const seen = new Set<string>();
+    const queries: PlannedQuery[] = [];
+    for (const q of Array.isArray(value.queries) ? value.queries : []) {
+      const query = typeof q?.query === "string" ? q.query.trim().replace(/\s+/g, " ").slice(0, 80) : "";
+      if (!query || seen.has(query.toLowerCase())) continue;
+      seen.add(query.toLowerCase());
+      queries.push({ query, why: typeof q?.why === "string" ? q.why.trim().slice(0, 120) : "model-planned angle" });
+      if (queries.length >= 6) break;
+    }
+
+    if (queries.length === 0) return null;
+    return { subject: subject || subjectOf(sentence), queries };
+  } catch {
+    return null;
+  }
+}
+
 export async function runResearch(input: ResearchInput): Promise<ResearchResult> {
   const started = Date.now();
   const budget = input.budgetMs ?? DEFAULT_BUDGET;
   const deadline = started + budget;
 
   const sentence = input.sentence.trim();
-  const subject = subjectOf(sentence);
+  let subject = subjectOf(sentence);
+  let queries = querySet(sentence, subject);
+
+  /* ————— 0. the model plans the searches ————— */
+
+  const planned = await planQueries(input, sentence, deadline);
+  if (planned) {
+    subject = planned.subject;
+    queries = planned.queries;
+    await input.emit("success", `search plan by model — subject "${subject}", ${queries.length} angle(s)`);
+  } else {
+    await input.emit("warn", "no model answered for query planning — falling back to template queries");
+  }
 
   await input.emit("command", `$ lastmile research --subject "${subject}"`);
   await input.emit("info", `research budget: ${Math.round(budget / 1000)}s, model tier ${input.plan.modelTier}`);
 
   /* ————— 1. search ————— */
 
-  const queries = querySet(sentence, subject);
   const allHits: SearchHit[] = [];
   const queriesRun: string[] = [];
   const searchProvidersUsed = new Set<string>();

@@ -49,7 +49,8 @@ export type DeployResult = {
 
 export async function runDeployer(input: DeployInput): Promise<DeployResult> {
   const started = Date.now();
-  await input.emit("command", `$ lastmile deploy --project lastmile-${input.slug}`);
+  const project = deployName(input.slug);
+  await input.emit("command", `$ lastmile deploy --project ${project}`);
 
   if (!input.repo) {
     return { ok: false, url: null, tokens: 0, reason: "the run has no repository to deploy" };
@@ -124,7 +125,7 @@ export async function runDeployer(input: DeployInput): Promise<DeployResult> {
        file by path, digest and size — the same digest the upload declared. */
     const framework = await detectFramework(dir);
     const body = {
-      name: `lastmile-${sanitize(input.slug)}`,
+      name: project,
       target: "production",
       files: files.map((f) => ({ file: f.path, sha: f.sha, size: f.size })),
       projectSettings: { framework },
@@ -161,13 +162,23 @@ export async function runDeployer(input: DeployInput): Promise<DeployResult> {
         const d = (await poll.json()) as {
           readyState?: string;
           url?: string;
+          alias?: string[];
           errorMessage?: string;
           readyStateError?: { message?: string } | null;
         };
         state = d.readyState ?? "";
         errorMessage = d.errorMessage ?? d.readyStateError?.message ?? "";
         if (state === "READY") {
-          readyUrl = d.url ? `https://${d.url}` : null;
+          /* The deployment's own url carries a random suffix
+             (`project-7h8zp1yeq-team.vercel.app`); the alias array carries the
+             canonical project domain (`project.vercel.app`) a production
+             deployment is bound to. Prefer the clean one — it is the address
+             the project actually lives at — and fall back to the raw url only
+             when no alias came back. */
+          const canonical = (d.alias ?? [])
+            .filter((a) => a.endsWith(".vercel.app"))
+            .sort((a, b) => a.length - b.length)[0];
+          readyUrl = canonical ? `https://${canonical}` : d.url ? `https://${d.url}` : null;
           break;
         }
         if (state === "ERROR" || state === "CANCELED") break;
@@ -281,6 +292,17 @@ async function detectFramework(dir: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** The project name the deployment is created under. It is namespaced with
+    `lastmile-` on purpose: creating a deployment under a bare name would
+    silently adopt any project the operator already owns with that name and
+    overwrite its production domain. The randomness the operator actually sees
+    is in Vercel's per-deployment URL, and the canonical `project.vercel.app`
+    alias is preferred when reading the result — the returned address is clean
+    ("lastmile-xyz-game.vercel.app"), with no hash suffix. */
+function deployName(slug: string): string {
+  return `lastmile-${sanitize(slug)}`;
 }
 
 function sanitize(name: string): string {
