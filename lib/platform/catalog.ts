@@ -218,23 +218,37 @@ export async function setProviderEnabled(id: string, enabled: boolean): Promise<
 /** Rewrite priorities from the operator's own order: first in the list is
     reached first. Numbers are spread by 10 so a later hand-edit has room, and
     every provider in the id list is renumbered — an arrangement is a statement
-    about the whole chain, not a patch. */
+    about the whole chain, not a patch.
+
+    The array is rewritten to the same order. It used to leave the array alone,
+    and that discrepancy was the "my order undid itself" bug: the chain walks
+    priorities, but a panel that renders the array drew the old arrangement on
+    the next load, and only auto-arrange ever rewrote the array. One order,
+    stored once. */
 export async function setProviderOrder(ids: string[]): Promise<{ ok: boolean; error?: string; notice?: string }> {
   const current = await getPlatformData();
   const known = new Set(current.providers.map((p) => p.id));
   const ordered = ids.filter((id) => known.has(id));
   if (ordered.length === 0) return { ok: false, error: "The new order did not name any provider." };
 
-  const missing = current.providers.filter((p) => !ordered.includes(p.id)).map((p) => p.id);
+  /* Providers the drag list did not name keep their relative order — by their
+     existing priority, not by accident — and follow the dragged ones. */
+  const missing = current.providers
+    .filter((p) => !ordered.includes(p.id))
+    .sort((a, b) => b.priority - a.priority)
+    .map((p) => p.id);
   const full = [...ordered, ...missing];
 
-  await updatePlatformData((data) => ({
-    ...data,
-    providers: data.providers.map((p) => {
-      const index = full.indexOf(p.id);
-      return { ...p, priority: (full.length - index) * 10 };
-    }),
-  }));
+  await updatePlatformData((data) => {
+    const rank = new Map(full.map((id, index) => [id, full.length - index]));
+    return {
+      ...data,
+      providers: full
+        .map((id) => data.providers.find((p) => p.id === id))
+        .filter((p): p is ProviderEntry => Boolean(p))
+        .map((p) => ({ ...p, priority: rank.get(p.id) ?? 0 })),
+    };
+  });
 
   return { ok: true, notice: `Failover order saved — ${ordered[0]} is reached first.` };
 }

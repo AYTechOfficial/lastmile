@@ -6,8 +6,14 @@ export const metadata = { title: "Providers — LastMile Admin" };
 
 export default async function AdminProvidersPage() {
   const platform = await getPlatformData();
-  const free = platform.providers.filter((p) => p.tier === "free");
-  const premium = platform.providers.filter((p) => p.tier === "premium");
+  /* The list renders in FAILOVER order — priority, highest first — because that
+     is the order the pipeline actually walks. It used to render the stored
+     array order, which only auto-arrange ever rewrote, so a manual drag saved
+     new priorities and the refresh drew the untouched array: the operator's
+     arrangement came back “undone” while the chain was really running it. */
+  const ordered = [...platform.providers].sort((a, b) => b.priority - a.priority);
+  const free = ordered.filter((p) => p.tier === "free");
+  const premium = ordered.filter((p) => p.tier === "premium");
 
   return (
     <>
@@ -34,7 +40,7 @@ export default async function AdminProvidersPage() {
       </div>
 
       <ProviderCatalog
-        providers={platform.providers}
+        providers={ordered}
         health={platform.health ?? {}}
         presets={PROVIDER_PRESETS}
         agents={PINNABLE_AGENTS}
